@@ -1,0 +1,42 @@
+[project]
+name = "openclaw"
+version = "0.1.0"
+description = "A local, desktop-first automation runtime."
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "loguru>=0.7.2",
+    "pydantic>=2.7",
+    "pyside6>=6.7",
+    "sqlmodel>=0.0.21",
+]
+
+[project.optional-dependencies]
+dev = ["mypy>=1.10", "pytest>=8.2", "pytest-asyncio>=0.23", "ruff>=0.5"]
+
+[project.scripts]
+openclaw = "openclaw.__main__:main"
+
+[project.entry-points."openclaw.plugins"]
+ats = "openclaw.plugins.ats:create_plugin"
+ollama = "openclaw.plugins.ollama:create_plugin"
+
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/openclaw"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+packages = ["openclaw"]
