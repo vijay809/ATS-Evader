@@ -28,6 +28,7 @@ from openclaw.core.runtime import Runtime
 from openclaw.core.tasks import TaskStatus
 from openclaw.ui.ai_workspace import AiWorkspace
 from openclaw.ui.ats_workspace import AtsWorkspace
+from openclaw.ui.job_search_workspace import JobSearchWorkspace
 from openclaw.ui.monitor import task_rows
 
 
@@ -67,6 +68,10 @@ class MainWindow(QMainWindow):
         ai_dock = QDockWidget("Local AI", self)
         ai_dock.setWidget(AiWorkspace(runtime))
         self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, ai_dock)
+        
+        job_search_dock = QDockWidget("Job Search", self)
+        job_search_dock.setWidget(JobSearchWorkspace(runtime))
+        self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, job_search_dock)
 
         ats_dock = QDockWidget("ATS analysis", self)
         ats_dock.setWidget(AtsWorkspace(runtime))
