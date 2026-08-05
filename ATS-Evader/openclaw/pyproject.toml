@@ -7,7 +7,9 @@ requires-python = ">=3.12"
 dependencies = [
     "loguru>=0.7.2",
     "pydantic>=2.7",
+    "pypdf>=5.0",
     "pyside6>=6.7",
+    "python-docx>=1.1.2",
     "sqlmodel>=0.0.21",
 ]
 
@@ -19,6 +21,7 @@ openclaw = "openclaw.__main__:main"
 
 [project.entry-points."openclaw.plugins"]
 ats = "openclaw.plugins.ats:create_plugin"
+documents = "openclaw.plugins.documents:create_plugin"
 ollama = "openclaw.plugins.ollama:create_plugin"
 
 [build-system]

@@ -12,7 +12,7 @@ async def test_task_changes_publish_events(tmp_path: Path) -> None:
     async def collect(event: object) -> None:
         received.append(str(event))
 
-    events.subscribe("task.changed", collect)  # type: ignore[arg-type]
+    events.subscribe("task.changed", collect)
     repository = SQLiteTaskRepository(tmp_path / "tasks.sqlite")
     repository.initialize()
     tasks = TaskManager(events, repository)

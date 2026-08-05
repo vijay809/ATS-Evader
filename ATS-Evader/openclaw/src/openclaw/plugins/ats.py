@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import json
+import logging
 from typing import Any
 
 from pydantic import BaseModel, Field
 
 from openclaw.plugins.manager import PluginContext
 from openclaw.plugins.ollama import OLLAMA_CLIENT_SERVICE, OllamaClient
+
+logger = logging.getLogger(__name__)
 
 ATS_ANALYZER_SERVICE = "ats.analyzer"
 
@@ -45,8 +48,17 @@ class AtsAnalyzer:
         if not resume.strip() or not job_description.strip():
             raise ValueError("Both resume and job description are required")
         prompt = self._build_prompt(resume, job_description)
-        completion = await self._client.generate(prompt, model=model)
-        return self._parse_analysis(completion.text)
+        
+        for attempt in range(3):
+            completion = await self._client.generate(prompt, model=model)
+            try:
+                return self._parse_analysis(completion.text)
+            except AtsAnalysisError as error:
+                if attempt == 2:
+                    raise
+                logger.warning(f"Failed to parse ATS analysis on attempt {attempt + 1}: {error}")
+                prompt += f"\n\nYour previous response was invalid: {error}. Please fix it and return ONLY valid JSON matching the exact schema."
+        raise AtsAnalysisError("Failed to generate valid ATS analysis after retries")
 
     async def tailor(
         self,
@@ -57,8 +69,18 @@ class AtsAnalyzer:
     ) -> TailoredResume:
         if not resume.strip() or not job_description.strip():
             raise ValueError("Both resume and job description are required")
-        completion = await self._client.generate(self._build_tailoring_prompt(resume, job_description), model=model)
-        return self._parse_tailoring(completion.text)
+        prompt = self._build_tailoring_prompt(resume, job_description)
+        
+        for attempt in range(3):
+            completion = await self._client.generate(prompt, model=model)
+            try:
+                return self._parse_tailoring(completion.text)
+            except AtsAnalysisError as error:
+                if attempt == 2:
+                    raise
+                logger.warning(f"Failed to parse Tailored resume on attempt {attempt + 1}: {error}")
+                prompt += f"\n\nYour previous response was invalid: {error}. Please fix it and return ONLY valid JSON matching the exact schema."
+        raise AtsAnalysisError("Failed to generate valid Tailored resume after retries")
 
     @staticmethod
     def _build_prompt(resume: str, job_description: str) -> str:

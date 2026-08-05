@@ -10,6 +10,7 @@ from typing import Protocol, cast
 from openclaw.core.config import RuntimeSettings
 from openclaw.core.events import EventBus, RuntimeEvent
 from openclaw.core.services import ServiceRegistry
+from openclaw.core.storage import DocumentRepository
 from openclaw.core.tasks import TaskManager
 
 PLUGIN_ENTRY_POINT_GROUP = "openclaw.plugins"
@@ -22,6 +23,7 @@ class PluginContext:
     settings: RuntimeSettings
     events: EventBus
     tasks: TaskManager
+    documents: DocumentRepository
     services: ServiceRegistry
 
 
