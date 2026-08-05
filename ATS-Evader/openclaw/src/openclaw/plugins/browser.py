@@ -4,13 +4,17 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import threading
+import concurrent.futures
 from collections.abc import Callable
 
 from playwright.async_api import Browser, BrowserContext, Page, Playwright, async_playwright
-from playwright_stealth import stealth  # type: ignore[import-untyped]
+from playwright_stealth import Stealth  # type: ignore[import-untyped]
 
 from openclaw.core.events import RuntimeEvent
 from openclaw.plugins.manager import PluginContext
+from openclaw.plugins.semantic_navigator import SemanticNavigator
+from openclaw.plugins.ollama import OllamaClient
 
 logger = logging.getLogger(__name__)
 
@@ -24,18 +28,39 @@ class BrowserService:
         self._browser: Browser | None = None
         self._browser_context: BrowserContext | None = None
         self._page: Page | None = None
+        
+        self._loop = asyncio.new_event_loop()
+        self._thread = threading.Thread(target=self._run_loop, daemon=True)
+        self._thread.start()
+
+    def _run_loop(self) -> None:
+        asyncio.set_event_loop(self._loop)
+        self._loop.run_forever()
 
     def _on_disconnected(self, browser: Browser) -> None:
         self._page = None
         self._browser_context = None
         self._browser = None
-        if self._context:
-            # Optionally publish event (cannot await directly here as it's sync callback)
-            pass
 
-    async def launch(self, url: str | None = None) -> None:
+    async def _launch_impl(self, url: str | None) -> None:
+        if self._browser is not None and not self._browser.is_connected():
+            self._page = None
+            self._browser_context = None
+            self._browser = None
+            
         if self._browser is not None:
-            if url and self._page:
+            if self._page is None or self._page.is_closed():
+                if self._browser_context is None:
+                    # fallback if context was lost
+                    self._browser_context = await self._browser.new_context(
+                        viewport={"width": 1280, "height": 800},
+                        user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
+                    )
+                self._page = await self._browser_context.new_page()
+                stealth = Stealth()
+                await stealth.apply_stealth_async(self._page)
+                
+            if url:
                 await self._page.goto(url)
             return
 
@@ -47,14 +72,17 @@ class BrowserService:
             user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
         )
         self._page = await self._browser_context.new_page()
-        await stealth(self._page)
+        stealth = Stealth()
+        await stealth.apply_stealth_async(self._page)
         
         if url:
             await self._page.goto(url)
-            
-        await self._context.events.publish(RuntimeEvent("browser.launched", {}))
 
-    async def close(self) -> None:
+    async def launch(self, url: str | None = None) -> None:
+        future = asyncio.run_coroutine_threadsafe(self._launch_impl(url), self._loop)
+        await asyncio.wrap_future(future)
+
+    async def _close_impl(self) -> None:
         if self._page:
             await self._page.close()
             self._page = None
@@ -68,26 +96,21 @@ class BrowserService:
         if self._playwright:
             await self._playwright.stop()
             self._playwright = None
-        
-        await self._context.events.publish(RuntimeEvent("browser.closed", {}))
+
+    async def close(self) -> None:
+        future = asyncio.run_coroutine_threadsafe(self._close_impl(), self._loop)
+        await asyncio.wrap_future(future)
 
     @property
     def page(self) -> Page | None:
         return self._page
 
-    async def extract_naukri_jd(self, url: str) -> dict[str, str]:
-        """Extracts job details specifically targeting Naukri.com structure."""
-        if not self._page:
-            raise RuntimeError("Browser not launched.")
+    async def _extract_naukri_jd_impl(self, url: str) -> dict[str, str]:
+        if not self._page or self._page.is_closed():
+            raise RuntimeError("Browser not launched or page is closed.")
         
         await self._page.goto(url, wait_until="domcontentloaded")
-        # Give it a moment to load dynamic content
         await asyncio.sleep(2)
-        
-        # Simplified extraction logic for the prototype
-        # On Naukri, job descriptions are often within elements having 'job-desc' or similar classes.
-        # We will extract the full visible text and use the local LLM to parse it if needed,
-        # or just grab standard selectors.
         
         title = await self._page.locator("h1").first.text_content() or "Unknown Title"
         company_loc = self._page.locator(".jd-header-comp-name a").first
@@ -96,7 +119,6 @@ class BrowserService:
         desc_loc = self._page.locator(".job-desc").first
         description = await desc_loc.text_content() if await desc_loc.count() > 0 else ""
         if not description:
-            # Fallback to body text
             description = await self._page.locator("body").text_content() or ""
             
         return {
@@ -104,6 +126,14 @@ class BrowserService:
             "company": company.strip() if company else "",
             "description": description.strip() if description else ""
         }
+
+    async def extract_naukri_jd(self, url: str) -> dict[str, str]:
+        future = asyncio.run_coroutine_threadsafe(self._extract_naukri_jd_impl(url), self._loop)
+        return await asyncio.wrap_future(future)
+
+    def stop_thread(self) -> None:
+        self._loop.call_soon_threadsafe(self._loop.stop)
+        self._thread.join(timeout=2.0)
 
 
 class BrowserPlugin:
@@ -118,11 +148,20 @@ class BrowserPlugin:
         self._context = context
         self._service = BrowserService(context)
         context.services.provide(BROWSER_SERVICE, self._service)
+        
+        ollama_client = context.services.get("ollama.client")
+        if not isinstance(ollama_client, OllamaClient):
+            raise TypeError("OllamaClient is required")
+            
+        self._navigator = SemanticNavigator(ollama_client, self._service)
+        context.services.provide("browser.navigator", self._navigator)
 
     async def stop(self) -> None:
         if self._service is not None:
             await self._service.close()
+            self._service.stop_thread()
         if self._context is not None:
+            self._context.services.remove("browser.navigator")
             self._context.services.remove(BROWSER_SERVICE)
 
 

@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QPlainTextEdit,
     QPushButton,
     QVBoxLayout,
     QWidget,
@@ -20,6 +21,7 @@ from openclaw.core.documents import JobDescription
 from openclaw.core.runtime import Runtime
 from openclaw.core.tasks import TaskStatus
 from openclaw.plugins.browser import BROWSER_SERVICE, BrowserService
+from openclaw.plugins.semantic_navigator import SemanticNavigator, SemanticResult
 
 
 class BrowserWorker(QThread):
@@ -62,6 +64,24 @@ class LaunchBrowserWorker(QThread):
         self.completed.emit()
 
 
+class SemanticWorker(QThread):
+    completed = Signal(object)
+    failed = Signal(str)
+
+    def __init__(self, navigator: SemanticNavigator, command: str) -> None:
+        super().__init__()
+        self._navigator = navigator
+        self._command = command
+
+    def run(self) -> None:
+        try:
+            result = asyncio.run(self._navigator.execute_command(self._command))
+        except Exception as error:
+            self.failed.emit(str(error))
+            return
+        self.completed.emit(result)
+
+
 class JobSearchWorkspace(QWidget):
     """UI for managing Playwright session and job search."""
 
@@ -79,19 +99,34 @@ class JobSearchWorkspace(QWidget):
         
         self._extract_button = QPushButton("Extract JD (Naukri)")
         self._extract_button.clicked.connect(self.extract_jd)
+        
+        # Semantic UI
+        self._command_input = QLineEdit()
+        self._command_input.setPlaceholderText("E.g., Click the search button, or Type 'Python'")
+        self._command_input.returnPressed.connect(self.execute_command)
+        
+        self._execute_button = QPushButton("Execute")
+        self._execute_button.clicked.connect(self.execute_command)
+        
+        self._reasoning_log = QPlainTextEdit()
+        self._reasoning_log.setReadOnly(True)
+        self._reasoning_log.setPlaceholderText("AI Reasoning Log...")
 
         form = QFormLayout()
         form.addRow("Target URL", self._url_input)
+        form.addRow("Agent Command", self._command_input)
         
         controls = QHBoxLayout()
         controls.addWidget(self._launch_button)
         controls.addWidget(self._extract_button)
+        controls.addWidget(self._execute_button)
         controls.addWidget(self._status)
         
         layout = QVBoxLayout(self)
         layout.addLayout(form)
         layout.addLayout(controls)
-        layout.addStretch()
+        layout.addWidget(QLabel("AI Reasoning & Actions:"))
+        layout.addWidget(self._reasoning_log)
 
     def launch_browser(self) -> None:
         try:
@@ -161,12 +196,54 @@ class JobSearchWorkspace(QWidget):
         self._finish(TaskStatus.FAILED, message)
         self._set_status(f"Failed: {message}")
 
+    def execute_command(self) -> None:
+        command = self._command_input.text().strip()
+        if not command:
+            self._set_status("Enter a command to execute.")
+            return
+            
+        try:
+            navigator = self._runtime.services.get("browser.navigator")
+        except LookupError:
+            self._set_status("Semantic Navigator is unavailable.")
+            return
+            
+        if not isinstance(navigator, SemanticNavigator):
+            self._set_status("Invalid navigator service.")
+            return
+            
+        task = asyncio.run(self._runtime.tasks.create(f"Execute: {command}"))
+        asyncio.run(self._runtime.tasks.transition(task.id, TaskStatus.RUNNING, "Agent is thinking..."))
+        self._task_id = task.id
+        
+        self._set_status("Extracting DOM and generating action...")
+        self._execute_button.setEnabled(False)
+        self._command_input.setEnabled(False)
+        self._command_input.clear()
+        
+        self._worker = SemanticWorker(navigator, command)
+        self._worker.completed.connect(self._show_semantic_result)
+        self._worker.failed.connect(self._show_failure)
+        self._worker.start()
+
+    def _show_semantic_result(self, result: SemanticResult) -> None:
+        if result.success:
+            self._reasoning_log.appendPlainText(f"--- SUCCESS ---\nReasoning: {result.reasoning}\nAction: {result.action}\n")
+            self._finish(TaskStatus.SUCCEEDED, f"Executed: {result.action}")
+            self._set_status(f"Executed: {result.action}")
+        else:
+            self._reasoning_log.appendPlainText(f"--- ERROR ---\nReasoning: {result.reasoning}\nError: {result.error}\n")
+            self._finish(TaskStatus.FAILED, str(result.error))
+            self._set_status("Failed to execute command.")
+
     def _finish(self, status: TaskStatus, detail: str) -> None:
         if self._task_id is not None:
             asyncio.run(self._runtime.tasks.transition(self._task_id, status, detail))
             self._task_id = None
         self._extract_button.setEnabled(True)
         self._launch_button.setEnabled(True)
+        self._execute_button.setEnabled(True)
+        self._command_input.setEnabled(True)
         self._worker = None
 
     def _set_status(self, message: str) -> None:
