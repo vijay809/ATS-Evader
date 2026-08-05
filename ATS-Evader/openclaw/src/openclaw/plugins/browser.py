@@ -25,12 +25,23 @@ class BrowserService:
         self._browser_context: BrowserContext | None = None
         self._page: Page | None = None
 
-    async def launch(self) -> None:
+    def _on_disconnected(self, browser: Browser) -> None:
+        self._page = None
+        self._browser_context = None
+        self._browser = None
+        if self._context:
+            # Optionally publish event (cannot await directly here as it's sync callback)
+            pass
+
+    async def launch(self, url: str | None = None) -> None:
         if self._browser is not None:
+            if url and self._page:
+                await self._page.goto(url)
             return
 
         self._playwright = await async_playwright().start()
         self._browser = await self._playwright.chromium.launch(headless=False)
+        self._browser.on("disconnected", self._on_disconnected)
         self._browser_context = await self._browser.new_context(
             viewport={"width": 1280, "height": 800},
             user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
@@ -38,6 +49,9 @@ class BrowserService:
         self._page = await self._browser_context.new_page()
         await stealth(self._page)
         
+        if url:
+            await self._page.goto(url)
+            
         await self._context.events.publish(RuntimeEvent("browser.launched", {}))
 
     async def close(self) -> None:
@@ -48,6 +62,7 @@ class BrowserService:
             await self._browser_context.close()
             self._browser_context = None
         if self._browser:
+            self._browser.remove_listener("disconnected", self._on_disconnected)
             await self._browser.close()
             self._browser = None
         if self._playwright:

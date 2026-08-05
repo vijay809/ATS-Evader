@@ -48,13 +48,14 @@ class LaunchBrowserWorker(QThread):
     completed = Signal()
     failed = Signal(str)
 
-    def __init__(self, service: BrowserService) -> None:
+    def __init__(self, service: BrowserService, url: str) -> None:
         super().__init__()
         self._service = service
+        self._url = url
 
     def run(self) -> None:
         try:
-            asyncio.run(self._service.launch())
+            asyncio.run(self._service.launch(self._url))
         except Exception as error:
             self.failed.emit(str(error))
             return
@@ -105,7 +106,8 @@ class JobSearchWorkspace(QWidget):
 
         self._set_status("Launching browser...")
         self._launch_button.setEnabled(False)
-        self._worker = LaunchBrowserWorker(service)
+        url = self._url_input.text().strip()
+        self._worker = LaunchBrowserWorker(service, url)
         self._worker.completed.connect(self._on_launched)
         self._worker.failed.connect(self._show_failure)
         self._worker.start()
