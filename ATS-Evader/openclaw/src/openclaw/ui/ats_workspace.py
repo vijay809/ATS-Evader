@@ -7,16 +7,22 @@ from uuid import UUID
 
 from PySide6.QtCore import QThread, Signal
 from PySide6.QtWidgets import (
+    QDialog,
+    QFileDialog,
     QFormLayout,
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QMessageBox,
     QPlainTextEdit,
     QPushButton,
+    QSplitter,
     QVBoxLayout,
     QWidget,
 )
+from PySide6.QtCore import Qt
 
+from openclaw.core.documents import AnalysisResult, JobDescription, Resume, TailoredDraft
 from openclaw.core.runtime import Runtime
 from openclaw.core.tasks import TaskStatus
 from openclaw.plugins.ats import (
@@ -73,6 +79,61 @@ class TailorWorker(QThread):
         self.completed.emit(result)
 
 
+class TailorReviewDialog(QDialog):
+    def __init__(self, original: str, tailored: TailoredResume, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("Review Tailored Resume")
+        self.resize(1000, 600)
+        self.approved = False
+        
+        splitter = QSplitter(Qt.Orientation.Horizontal)
+        
+        orig_text = QPlainTextEdit(original)
+        orig_text.setReadOnly(True)
+        
+        self.tailored_text = QPlainTextEdit(tailored.tailored_resume)
+        
+        left_layout = QVBoxLayout()
+        left_layout.addWidget(QLabel("Original Resume"))
+        left_layout.addWidget(orig_text)
+        left_widget = QWidget()
+        left_widget.setLayout(left_layout)
+        
+        right_layout = QVBoxLayout()
+        right_layout.addWidget(QLabel("Tailored Draft (Editable)"))
+        right_layout.addWidget(self.tailored_text)
+        
+        changes = "\n".join(f"- {item}" for item in tailored.change_summary) or "- None"
+        warnings = "\n".join(f"- {item}" for item in tailored.warnings) or "- None"
+        info = QPlainTextEdit(f"Changes:\n{changes}\n\nWarnings:\n{warnings}")
+        info.setReadOnly(True)
+        right_layout.addWidget(QLabel("Summary & Warnings"))
+        right_layout.addWidget(info)
+        
+        right_widget = QWidget()
+        right_widget.setLayout(right_layout)
+        
+        splitter.addWidget(left_widget)
+        splitter.addWidget(right_widget)
+        
+        controls = QHBoxLayout()
+        approve_btn = QPushButton("Approve and Save")
+        approve_btn.clicked.connect(self.approve)
+        cancel_btn = QPushButton("Discard")
+        cancel_btn.clicked.connect(self.reject)
+        controls.addStretch()
+        controls.addWidget(cancel_btn)
+        controls.addWidget(approve_btn)
+        
+        layout = QVBoxLayout(self)
+        layout.addWidget(splitter)
+        layout.addLayout(controls)
+
+    def approve(self) -> None:
+        self.approved = True
+        self.accept()
+
+
 class AtsWorkspace(QWidget):
     """Paste-in resume analysis; users review every recommendation before acting on it."""
 
@@ -94,11 +155,24 @@ class AtsWorkspace(QWidget):
         self._analyze_button.clicked.connect(self.analyze)
         self._tailor_button = QPushButton("Tailor resume locally")
         self._tailor_button.clicked.connect(self.tailor)
+        self._import_resume_btn = QPushButton("Import Resume")
+        self._import_resume_btn.clicked.connect(self.import_resume)
+        self._import_jd_btn = QPushButton("Import JD")
+        self._import_jd_btn.clicked.connect(self.import_jd)
 
         form = QFormLayout()
         form.addRow("Model", self._model)
-        form.addRow("Resume", self._resume)
-        form.addRow("Job description", self._job_description)
+        
+        resume_layout = QVBoxLayout()
+        resume_layout.addWidget(self._import_resume_btn)
+        resume_layout.addWidget(self._resume)
+        
+        jd_layout = QVBoxLayout()
+        jd_layout.addWidget(self._import_jd_btn)
+        jd_layout.addWidget(self._job_description)
+
+        form.addRow("Resume", resume_layout)
+        form.addRow("Job description", jd_layout)
         controls = QHBoxLayout()
         controls.addWidget(self._analyze_button)
         controls.addWidget(self._tailor_button)
@@ -108,6 +182,39 @@ class AtsWorkspace(QWidget):
         layout.addLayout(controls)
         layout.addWidget(QLabel("ATS analysis"))
         layout.addWidget(self._result)
+
+    def import_resume(self) -> None:
+        self._import_document(self._resume)
+
+    def import_jd(self) -> None:
+        self._import_document(self._job_description)
+
+    def _import_document(self, text_edit: QPlainTextEdit) -> None:
+        try:
+            from openclaw.plugins.documents import DOCUMENTS_SERVICE, DocumentIngestionService
+            service = self._runtime.services.get(DOCUMENTS_SERVICE)
+            if not isinstance(service, DocumentIngestionService):
+                self._set_status("Document ingestion service is invalid.")
+                return
+        except LookupError:
+            self._set_status("Document ingestion plugin is not available.")
+            return
+
+        file_path, _ = QFileDialog.getOpenFileName(self, "Open Document", "", "Documents (*.pdf *.docx *.txt *.md)")
+        if file_path:
+            try:
+                text = service.read_text(file_path)
+                text_edit.setPlainText(text)
+                self._set_status(f"Imported document: {file_path}")
+            except Exception as error:
+                self._show_failure(f"Failed to import: {error}")
+
+    def _persist_inputs(self, resume_text: str, jd_text: str) -> tuple[Resume, JobDescription]:
+        resume = Resume(content=resume_text)
+        jd = JobDescription(content=jd_text)
+        self._runtime.plugins._context.documents.save_resume(resume)
+        self._runtime.plugins._context.documents.save_job_description(jd)
+        return resume, jd
 
     def analyze(self) -> None:
         resume = self._resume.toPlainText().strip()
@@ -180,20 +287,56 @@ class AtsWorkspace(QWidget):
         )
         self._finish(TaskStatus.SUCCEEDED, f"Match score: {result.match_score}/100")
         self._set_status("Analysis complete. Review recommendations before editing your resume.")
+        
+        # Persist analysis
+        resume, jd = self._persist_inputs(self._resume.toPlainText().strip(), self._job_description.toPlainText().strip())
+        record = AnalysisResult(
+            resume_id=resume.id,
+            job_id=jd.id,
+            match_score=result.match_score,
+            matched_keywords=",".join(result.matched_keywords),
+            missing_keywords=",".join(result.missing_keywords),
+            recommendations="\n".join(result.recommendations),
+            summary=result.summary
+        )
+        self._runtime.plugins._context.documents.save_analysis(record)
 
     def _show_tailoring(self, result: object) -> None:
         if not isinstance(result, TailoredResume):
             self._show_failure("The ATS plugin returned an invalid tailored resume.")
             return
-        changes = "\n".join(f"- {item}" for item in result.change_summary) or "- None"
-        warnings = "\n".join(f"- {item}" for item in result.warnings) or "- None"
-        self._result.setPlainText(
-            f"Tailored resume draft\n\n{result.tailored_resume}\n\n"
-            f"Change summary\n{changes}\n\n"
-            f"Warnings — verify before use\n{warnings}"
-        )
-        self._finish(TaskStatus.SUCCEEDED, "Tailored resume draft ready for review")
-        self._set_status("Draft ready. Verify all content before using it.")
+        
+        resume_text = self._resume.toPlainText().strip()
+        dialog = TailorReviewDialog(resume_text, result, self)
+        
+        if dialog.exec():
+            # Approved
+            final_content = dialog.tailored_text.toPlainText()
+            changes = "\n".join(f"- {item}" for item in result.change_summary) or "- None"
+            warnings = "\n".join(f"- {item}" for item in result.warnings) or "- None"
+            
+            self._result.setPlainText(
+                f"Tailored resume draft (APPROVED)\n\n{final_content}\n\n"
+                f"Change summary\n{changes}\n\n"
+                f"Warnings\n{warnings}"
+            )
+            
+            # Persist draft
+            resume, jd = self._persist_inputs(resume_text, self._job_description.toPlainText().strip())
+            draft = TailoredDraft(
+                resume_id=resume.id,
+                job_id=jd.id,
+                content=final_content,
+                change_summary=",".join(result.change_summary),
+                warnings=",".join(result.warnings)
+            )
+            self._runtime.plugins._context.documents.save_draft(draft)
+            
+            self._finish(TaskStatus.SUCCEEDED, "Tailored resume draft approved and saved")
+            self._set_status("Draft approved and saved.")
+        else:
+            self._finish(TaskStatus.CANCELLED, "Tailored resume draft discarded")
+            self._set_status("Draft discarded.")
 
     def _show_failure(self, message: str) -> None:
         self._finish(TaskStatus.FAILED, message)
