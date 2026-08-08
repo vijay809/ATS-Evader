@@ -24,6 +24,11 @@ class AtsAnalysis(BaseModel):
     summary: str
 
 
+class ParsedResumeData(BaseModel):
+    preferences: dict[str, str]
+    structured_json: str
+
+
 class TailoredResume(BaseModel):
     tailored_resume: str
     change_summary: list[str]
@@ -125,6 +130,58 @@ Job description:
 ---
 {job_description}
 ---"""
+
+    def tailor_resume(self, master_resume: str, job_description: str, model_id: str = "gemma4:12b") -> TailoredResume:
+        prompt = f"""You are an expert ATS optimizer and resume writer.
+I will provide a master resume and a job description.
+Tailor the resume to match the job description perfectly while remaining truthful.
+
+<JOB_DESCRIPTION>
+{job_description}
+</JOB_DESCRIPTION>
+
+<MASTER_RESUME>
+{master_resume}
+</MASTER_RESUME>
+
+Respond ONLY with valid JSON matching this schema:
+{{
+  "tailored_resume": "The full text of the tailored resume",
+  "change_summary": ["Changed X to Y", "Added emphasis on Z"],
+  "warnings": ["Could not match requirement A"]
+}}
+"""
+        response = self._client.generate_sync(prompt, model=model_id)
+        try:
+            return TailoredResume.model_validate_json(response.text)
+        except Exception as e:
+            logger.error(f"Failed to parse tailored resume: {response.text}")
+            raise AtsAnalysisError("Invalid tailor response from model") from e
+
+    def parse_master_resume(self, raw_text: str, model_id: str = "gemma4:12b") -> ParsedResumeData:
+        prompt = f"""You are an expert data extractor.
+Extract the core details and implicit preferences from this raw resume text.
+
+<RESUME>
+{raw_text}
+</RESUME>
+
+Respond ONLY with valid JSON matching this schema:
+{{
+  "preferences": {{
+    "Target Role": "E.g. Senior Software Engineer",
+    "Location": "E.g. Remote or specific city",
+    "Min Years Exp": "E.g. 5"
+  }},
+  "structured_json": "A stringified JSON representing the candidate's core skills, experience, and contact info"
+}}
+"""
+        response = self._client.generate_sync(prompt, model=model_id)
+        try:
+            return ParsedResumeData.model_validate_json(response.text)
+        except Exception as e:
+            logger.error(f"Failed to parse master resume: {response.text}")
+            raise AtsAnalysisError("Invalid parse response from model") from e
 
     @staticmethod
     def _parse_analysis(response: str) -> AtsAnalysis:

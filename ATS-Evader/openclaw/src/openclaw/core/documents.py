@@ -14,9 +14,26 @@ class Resume:
 
 
 @dataclass(slots=True)
+class StructuredResume:
+    raw_content: str
+    parsed_json: str
+    name: str = "Master Resume"
+    id: UUID = field(default_factory=uuid4)
+
+
+@dataclass(slots=True)
+class Preference:
+    key: str
+    value: str
+    id: UUID = field(default_factory=uuid4)
+
+
+@dataclass(slots=True)
 class JobDescription:
     content: str
     name: str = "Imported JD"
+    status: str = "Discovered"
+    url: str | None = None
     id: UUID = field(default_factory=uuid4)
 
 

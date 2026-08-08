@@ -88,7 +88,8 @@ The Codex sandbox may fail to access Python. If that happens, rerun only these c
 4. **Persist user work.** Add SQLModel entities/repositories for resumes, job descriptions, analyses, and tailored drafts. Design migrations deliberately; do not store raw data outside the configured local DB.
 5. **Document ingestion.** Add a separate local plugin for importing `.docx` and PDF text, with preview/confirmation before storing. Do not silently overwrite original files.
 6. **Review workflow.** Add side-by-side original/draft comparison, editable draft text, an explicit approval state, and export only after user action.
-7. **Only then consider browser/job-search capability.** Make it a separate plugin with visible session state, per-action confirmation, audit events, and no auto-submit behavior.
+8. **Cover Letter Generator.** Use the local LLM to generate targeted cover letters based on the job description and the user's base profile.
+9. **Eligibility Engine.** Add a rules-based filter to automatically reject jobs that don't meet basic criteria (salary, location, remote status, min experience) before sending them to the heavier ATS LLM analysis.
 
 ## Useful test locations
 

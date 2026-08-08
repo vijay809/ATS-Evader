@@ -10,10 +10,10 @@ from collections.abc import Iterable
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
-from sqlmodel import Field, Session, SQLModel, create_engine, select
+from sqlmodel import Field, Session, SQLModel, create_engine, select, desc
 
 if TYPE_CHECKING:
-    from openclaw.core.documents import AnalysisResult, JobDescription, Resume, TailoredDraft
+    from openclaw.core.documents import AnalysisResult, JobDescription, Resume, TailoredDraft, StructuredResume, Preference
     from openclaw.core.tasks import Task
 
 
@@ -29,11 +29,24 @@ class ResumeRecord(SQLModel, table=True):
     name: str
     content: str
 
+class StructuredResumeRecord(SQLModel, table=True):
+    id: str = Field(primary_key=True)
+    name: str
+    raw_content: str
+    parsed_json: str
+
+class PreferenceRecord(SQLModel, table=True):
+    id: str = Field(primary_key=True)
+    key: str
+    value: str
+
 
 class JobDescriptionRecord(SQLModel, table=True):
     id: str = Field(primary_key=True)
     name: str
     content: str
+    status: str = "Discovered"
+    url: str | None = None
 
 
 class AnalysisResultRecord(SQLModel, table=True):
@@ -64,14 +77,19 @@ class TaskRepository(Protocol):
 
 class DocumentRepository(Protocol):
     def save_resume(self, resume: Resume) -> None: ...
+    def save_structured_resume(self, resume: StructuredResume) -> None: ...
+    def save_preference(self, pref: Preference) -> None: ...
     def save_job_description(self, jd: JobDescription) -> None: ...
     def save_analysis(self, analysis: AnalysisResult) -> None: ...
     def save_draft(self, draft: TailoredDraft) -> None: ...
     
     def get_resume(self, resume_id: str) -> Resume | None: ...
+    def get_structured_resume(self) -> StructuredResume | None: ...
+    def get_preferences(self) -> Iterable[Preference]: ...
     def get_job_description(self, jd_id: str) -> JobDescription | None: ...
     def list_resumes(self) -> Iterable[Resume]: ...
     def list_job_descriptions(self) -> Iterable[JobDescription]: ...
+    def get_latest_analysis(self, job_id: str) -> AnalysisResult | None: ...
 
 
 class SQLiteTaskRepository:
@@ -115,6 +133,7 @@ class SQLiteTaskRepository:
 class SQLiteDocumentRepository:
     def __init__(self, database_path: Path) -> None:
         self._engine = create_engine(f"sqlite:///{database_path}")
+        SQLModel.metadata.create_all(self._engine)
 
     def save_resume(self, resume: Resume) -> None:
         record = ResumeRecord(id=str(resume.id), name=resume.name, content=resume.content)
@@ -122,8 +141,20 @@ class SQLiteDocumentRepository:
             session.merge(record)
             session.commit()
 
+    def save_structured_resume(self, resume: StructuredResume) -> None:
+        record = StructuredResumeRecord(id=str(resume.id), name=resume.name, raw_content=resume.raw_content, parsed_json=resume.parsed_json)
+        with Session(self._engine) as session:
+            session.merge(record)
+            session.commit()
+
+    def save_preference(self, pref: Preference) -> None:
+        record = PreferenceRecord(id=str(pref.id), key=pref.key, value=pref.value)
+        with Session(self._engine) as session:
+            session.merge(record)
+            session.commit()
+
     def save_job_description(self, jd: JobDescription) -> None:
-        record = JobDescriptionRecord(id=str(jd.id), name=jd.name, content=jd.content)
+        record = JobDescriptionRecord(id=str(jd.id), name=jd.name, content=jd.content, status=jd.status, url=jd.url)
         with Session(self._engine) as session:
             session.merge(record)
             session.commit()
@@ -165,6 +196,22 @@ class SQLiteDocumentRepository:
                 return None
             return Resume(id=UUID(record.id), name=record.name, content=record.content)
 
+    def get_structured_resume(self) -> StructuredResume | None:
+        from uuid import UUID
+        from openclaw.core.documents import StructuredResume
+        with Session(self._engine) as session:
+            record = session.exec(select(StructuredResumeRecord)).first()
+            if not record:
+                return None
+            return StructuredResume(id=UUID(record.id), name=record.name, raw_content=record.raw_content, parsed_json=record.parsed_json)
+
+    def get_preferences(self) -> Iterable[Preference]:
+        from uuid import UUID
+        from openclaw.core.documents import Preference
+        with Session(self._engine) as session:
+            records = session.exec(select(PreferenceRecord)).all()
+        return tuple(Preference(id=UUID(record.id), key=record.key, value=record.value) for record in records)
+
     def get_job_description(self, jd_id: str) -> JobDescription | None:
         from uuid import UUID
         from openclaw.core.documents import JobDescription
@@ -172,7 +219,7 @@ class SQLiteDocumentRepository:
             record = session.get(JobDescriptionRecord, jd_id)
             if not record:
                 return None
-            return JobDescription(id=UUID(record.id), name=record.name, content=record.content)
+            return JobDescription(id=UUID(record.id), name=record.name, content=record.content, status=record.status, url=record.url)
 
     def list_resumes(self) -> Iterable[Resume]:
         from uuid import UUID
@@ -186,5 +233,28 @@ class SQLiteDocumentRepository:
         from openclaw.core.documents import JobDescription
         with Session(self._engine) as session:
             records = session.exec(select(JobDescriptionRecord)).all()
-        return tuple(JobDescription(id=UUID(record.id), name=record.name, content=record.content) for record in records)
+        return tuple(JobDescription(id=UUID(record.id), name=record.name, content=record.content, status=record.status, url=record.url) for record in records)
+
+    def get_latest_analysis(self, job_id: str) -> AnalysisResult | None:
+        from uuid import UUID
+        from openclaw.core.documents import AnalysisResult
+        with Session(self._engine) as session:
+            # Get most recent analysis for this job
+            record = session.exec(
+                select(AnalysisResultRecord)
+                .where(AnalysisResultRecord.job_id == job_id)
+                .order_by(desc(AnalysisResultRecord.id))  # Just use ID or if we had timestamp we'd use that
+            ).first()
+            if not record:
+                return None
+            return AnalysisResult(
+                id=UUID(record.id),
+                resume_id=UUID(record.resume_id),
+                job_id=UUID(record.job_id),
+                match_score=record.match_score,
+                matched_keywords=record.matched_keywords,
+                missing_keywords=record.missing_keywords,
+                recommendations=record.recommendations,
+                summary=record.summary
+            )
 
