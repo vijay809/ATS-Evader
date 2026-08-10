@@ -16,23 +16,7 @@ if TYPE_CHECKING:
     from openclaw.core.runtime import Runtime
 
 
-class ParseWorker(QThread):
-    completed = Signal(object)
-    failed = Signal(str)
-
-    def __init__(self, analyzer: AtsAnalyzer, raw_text: str, model: str):
-        super().__init__()
-        self._analyzer = analyzer
-        self._raw_text = raw_text
-        self._model = model
-
-    def run() -> None:
-        try:
-            result = self._analyzer.parse_master_resume(self._raw_text, self._model)
-            self.completed.emit(result)
-        except Exception as e:
-            self.failed.emit(str(e))
-
+from openclaw.ui.terminal_loader import TerminalLoaderOverlay
 
 class SetupWorkspace(QWidget):
     """The Setup screen for parsing a master resume."""
@@ -40,7 +24,8 @@ class SetupWorkspace(QWidget):
     def __init__(self, runtime: 'Runtime') -> None:
         super().__init__()
         self._runtime = runtime
-        self._worker: ParseWorker | None = None
+        
+        self._loader = TerminalLoaderOverlay(self)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(24, 24, 24, 24)
@@ -90,40 +75,75 @@ class SetupWorkspace(QWidget):
             QMessageBox.warning(self, "Error", "ATS Analyzer service not available.")
             return
 
-        self._parse_btn.setText("Analyzing Syntax...")
-        self._parse_btn.setEnabled(False)
-
-        # Safe cast
         import typing
         from openclaw.plugins.ats import AtsAnalyzer
-        analyzer_typed = typing.cast(AtsAnalyzer, analyzer)
-
-        self._worker = ParseWorker(analyzer_typed, text, "gemma4:12b")
-        self._worker.completed.connect(self._on_parse_complete)
-        self._worker.failed.connect(self._on_parse_failed)
-        self._worker.start()
-
-    def _on_parse_complete(self, result: object) -> None:
-        self._parse_btn.setText("Parse & Extract Details")
-        self._parse_btn.setEnabled(True)
+        from openclaw.plugins.ollama import OLLAMA_CLIENT_SERVICE, OllamaClient
         
-        if not hasattr(result, "preferences"):
+        analyzer_typed = typing.cast(AtsAnalyzer, analyzer)
+        try:
+            ollama = typing.cast(OllamaClient, self._runtime.services.get(OLLAMA_CLIENT_SERVICE))
+        except LookupError:
+            QMessageBox.warning(self, "Error", "Ollama service not available.")
             return
+
+        state = {}
+
+        def check_ollama_availability() -> None:
+            if not ollama.check_ollama_availability():
+                raise Exception("Ollama executable not found in system PATH. Please install Ollama.")
+
+        def check_and_boot_server() -> None:
+            server_up = False
+            try:
+                server_up = ollama.check_connection()
+            except Exception:
+                pass
             
-        parsed = typing.cast(ParsedResumeData, result) # type: ignore
+            if not server_up:
+                ollama.boot_ollama()
+                import time
+                for _ in range(10):
+                    time.sleep(1)
+                    try:
+                        if ollama.check_connection():
+                            return
+                    except Exception:
+                        pass
+                raise Exception("Started Ollama but it did not become ready within 10 seconds.")
 
-        # Save Structured Resume
-        sr = StructuredResume(raw_content=self._text_area.toPlainText(), parsed_json=parsed.structured_json)
-        self._runtime.plugins._context.documents.save_structured_resume(sr)
+        def verify_ai_model() -> None:
+            models = ollama.get_available_models()
+            if not models:
+                raise Exception("No AI models installed in local Ollama.")
+            if "gemma4:12b" in models:
+                state['model'] = "gemma4:12b"
+            else:
+                state['model'] = models[0]
 
-        # Save Preferences
-        for k, v in parsed.preferences.items():
-            pref = Preference(key=k, value=v)
-            self._runtime.plugins._context.documents.save_preference(pref)
+        def parse_resume() -> None:
+            model = state.get('model', 'gemma4:12b')
+            # Synchronous call, runs in LoaderTask thread
+            result = analyzer_typed.parse_master_resume(text, model)
+            state['result'] = result
 
-        QMessageBox.information(self, "Success", "Resume parsed and preferences saved successfully!")
+        def save_data() -> None:
+            result = state.get('result')
+            if not result or not hasattr(result, "preferences"):
+                raise Exception("Invalid parsed data.")
+            
+            parsed = typing.cast(ParsedResumeData, result)
+            sr = StructuredResume(raw_content=text, parsed_json=parsed.structured_json)
+            self._runtime.plugins._context.documents.save_structured_resume(sr)
+            for k, v in parsed.preferences.items():
+                pref = Preference(key=k, value=v)
+                self._runtime.plugins._context.documents.save_preference(pref)
 
-    def _on_parse_failed(self, error: str) -> None:
-        self._parse_btn.setText("Parse & Extract Details")
-        self._parse_btn.setEnabled(True)
-        QMessageBox.critical(self, "Error", f"Failed to parse resume: {error}")
+        steps = [
+            ("CHECKING OLLAMA AVAILABILITY...", check_ollama_availability),
+            ("CONNECTING TO OLLAMA SERVER...", check_and_boot_server),
+            ("VERIFYING AI MODEL...", verify_ai_model),
+            ("PARSING MASTER RESUME STRUCTURE...", parse_resume),
+            ("SAVING PREFERENCES AND VECTORS...", save_data)
+        ]
+        
+        self._loader.start_sequence(steps)

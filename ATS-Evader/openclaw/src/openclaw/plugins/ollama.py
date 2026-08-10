@@ -56,6 +56,46 @@ class OllamaClient:
             raise OllamaUnavailableError("Ollama returned a response without generated text")
         returned_model = response.get("model", selected_model)
         return OllamaCompletion(model=str(returned_model), text=text)
+    def check_ollama_availability(self) -> bool:
+        """Check if the ollama executable is available in PATH."""
+        import shutil
+        return shutil.which("ollama") is not None
+
+    def boot_ollama(self) -> None:
+        """Start the local Ollama daemon in the background."""
+        import subprocess
+        # Use CREATE_NO_WINDOW on Windows to prevent a command prompt from flashing
+        creationflags = subprocess.CREATE_NO_WINDOW if hasattr(subprocess, "CREATE_NO_WINDOW") else 0
+        subprocess.Popen(
+            ["ollama", "serve"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            creationflags=creationflags
+        )
+
+    def get_available_models(self) -> list[str]:
+        """Fetch the list of installed model names from the local Ollama server."""
+        from urllib.request import urlopen, Request
+        import json
+        try:
+            req = Request(f"{self._settings.base_url.rstrip('/')}/api/tags", headers={"User-Agent": "OpenClaw/1.0"})
+            with urlopen(req, timeout=2.0) as response:
+                result = json.load(response)
+                return [m.get("name") for m in result.get("models", []) if "name" in m]
+        except Exception:
+            return []
+
+    def check_connection(self) -> bool:
+        """Verify the Ollama server is running by fetching tags."""
+        from urllib.request import urlopen, Request
+        import json
+        try:
+            req = Request(f"{self._settings.base_url.rstrip('/')}/api/tags", headers={"User-Agent": "OpenClaw/1.0"})
+            with urlopen(req, timeout=2.0) as response:
+                result = json.load(response)
+                return "models" in result
+        except Exception as e:
+            raise Exception(f"Connection failed: {e}")
 
     @staticmethod
     def _send_json(url: str, payload: dict[str, Any], timeout: float) -> dict[str, Any]:
@@ -69,7 +109,14 @@ class OllamaClient:
             with urlopen(request, timeout=timeout) as response:
                 result = json.load(response)
         except (URLError, OSError, json.JSONDecodeError) as error:
-            raise OllamaUnavailableError("Unable to reach the local Ollama server") from error
+            error_details = str(error)
+            if hasattr(error, "read"):
+                # It's likely an HTTPError with a body
+                try:
+                    error_details += " - " + error.read().decode("utf-8")
+                except Exception:
+                    pass
+            raise OllamaUnavailableError(f"Unable to reach the local Ollama server: {error_details}") from error
         if not isinstance(result, dict):
             raise OllamaUnavailableError("Ollama returned an unexpected response")
         return result

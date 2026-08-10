@@ -21,6 +21,7 @@ from PySide6.QtWidgets import (
     QMainWindow,
     QMessageBox,
     QPlainTextEdit,
+    QProgressBar,
     QPushButton,
     QStackedWidget,
     QTableWidget,
@@ -38,6 +39,34 @@ from openclaw.ui.setup_workspace import SetupWorkspace
 from openclaw.ui.process_workspace import ProcessWorkspace
 from openclaw.ui.job_pipeline_workspace import JobPipelineWorkspace
 from openclaw.ui.monitor import task_rows
+
+class SystemMonitorThread(QThread):
+    metrics_updated = Signal(float, float, float, float)  # cpu, ram, gpu_load, vram_usage
+    
+    def run(self) -> None:
+        import time
+        import psutil
+        try:
+            import GPUtil
+            has_gputil = True
+        except ImportError:
+            has_gputil = False
+
+        while not self.isInterruptionRequested():
+            cpu = psutil.cpu_percent()
+            ram = psutil.virtual_memory().percent
+            gpu_load = 0.0
+            vram_usage = 0.0
+            
+            if has_gputil:
+                gpus = GPUtil.getGPUs()
+                if gpus:
+                    gpu = gpus[0]
+                    gpu_load = gpu.load * 100
+                    vram_usage = (gpu.memoryUsed / gpu.memoryTotal) * 100 if gpu.memoryTotal > 0 else 0.0
+            
+            self.metrics_updated.emit(cpu, ram, gpu_load, vram_usage)
+            time.sleep(1.5)
 
 
 class MainWindow(QMainWindow):
@@ -112,9 +141,19 @@ class MainWindow(QMainWindow):
         top_bar_layout = QHBoxLayout(top_bar)
         top_bar_layout.setContentsMargins(24, 0, 24, 0)
 
-        status_lbl = QLabel("System Active")
-        status_lbl.setStyleSheet("color: #c1c6d7; font-size: 12px; font-weight: bold; text-transform: uppercase; border: none;")
-        top_bar_layout.addWidget(status_lbl)
+        top_bar_vlayout = QVBoxLayout()
+        top_bar_vlayout.setSpacing(4)
+        
+        self._status_lbl = QLabel("[ ] System Active    [ ] Ollama server    [ ] AI [None]")
+        self._status_lbl.setStyleSheet("color: #e5e2e1; font-size: 13px; font-weight: bold; border: none;")
+        
+        self._info_lbl = QLabel("Initializing system checks...")
+        self._info_lbl.setStyleSheet("color: #8b90a0; font-size: 11px; border: none;")
+        
+        top_bar_vlayout.addWidget(self._status_lbl)
+        top_bar_vlayout.addWidget(self._info_lbl)
+        
+        top_bar_layout.addLayout(top_bar_vlayout)
         top_bar_layout.addStretch()
 
         right_layout.addWidget(top_bar)
@@ -130,8 +169,80 @@ class MainWindow(QMainWindow):
         self._stacked.addWidget(self._history)
         right_layout.addWidget(self._stacked)
 
+        # Bottom Bar for System Metrics
+        bottom_bar = QFrame()
+        bottom_bar.setFixedHeight(40)
+        bottom_bar.setStyleSheet("background-color: rgba(19, 19, 19, 0.9); border-top: 1px solid rgba(255,255,255,0.05);")
+        bottom_layout = QHBoxLayout(bottom_bar)
+        bottom_layout.setContentsMargins(24, 0, 24, 0)
+        bottom_layout.setSpacing(24)
+
+        def create_metric_widget(label_text: str) -> QWidget:
+            container = QWidget()
+            layout = QHBoxLayout(container)
+            layout.setContentsMargins(0, 0, 0, 0)
+            layout.setSpacing(8)
+            lbl = QLabel(label_text)
+            lbl.setFixedWidth(40)
+            lbl.setStyleSheet("color: #8b90a0; font-size: 10px; font-weight: bold; border: none;")
+            pb = QProgressBar()
+            pb.setTextVisible(False)
+            pb.setFixedHeight(6)
+            pb.setStyleSheet("""
+                QProgressBar {
+                    background-color: #2a2a2a; border-radius: 3px;
+                }
+                QProgressBar::chunk {
+                    background-color: #adc6ff; border-radius: 3px;
+                }
+            """)
+            val_lbl = QLabel("0%")
+            val_lbl.setFixedWidth(30)
+            val_lbl.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            val_lbl.setStyleSheet("color: #e5e2e1; font-size: 10px; border: none;")
+            layout.addWidget(lbl)
+            layout.addWidget(pb, stretch=1)
+            layout.addWidget(val_lbl)
+            
+            # Store references to update later
+            container.pb = pb
+            container.val_lbl = val_lbl
+            return container
+
+        self._cpu_widget = create_metric_widget("CPU")
+        self._ram_widget = create_metric_widget("RAM")
+        self._gpu_widget = create_metric_widget("GPU")
+        self._vram_widget = create_metric_widget("VRAM")
+
+        bottom_layout.addWidget(self._cpu_widget, stretch=1)
+        bottom_layout.addWidget(self._ram_widget, stretch=1)
+        bottom_layout.addWidget(self._gpu_widget, stretch=1)
+        bottom_layout.addWidget(self._vram_widget, stretch=1)
+
+        right_layout.addWidget(bottom_bar)
+
         central_layout.addWidget(nav_rail)
         central_layout.addWidget(right_area)
+
+        # Start Monitor Thread
+        self._monitor_thread = SystemMonitorThread(self)
+        self._monitor_thread.metrics_updated.connect(self._update_metrics)
+        self._monitor_thread.start()
+
+    def _update_metrics(self, cpu: float, ram: float, gpu: float, vram: float) -> None:
+        self._cpu_widget.pb.setValue(int(cpu))
+        self._cpu_widget.val_lbl.setText(f"{int(cpu)}%")
+        self._ram_widget.pb.setValue(int(ram))
+        self._ram_widget.val_lbl.setText(f"{int(ram)}%")
+        self._gpu_widget.pb.setValue(int(gpu))
+        self._gpu_widget.val_lbl.setText(f"{int(gpu)}%")
+        self._vram_widget.pb.setValue(int(vram))
+        self._vram_widget.val_lbl.setText(f"{int(vram)}%")
+
+    def closeEvent(self, event: Any) -> None:
+        self._monitor_thread.requestInterruption()
+        self._monitor_thread.wait()
+        super().closeEvent(event)
 
         # Connections
         self._btn_setup.clicked.connect(lambda: self._stacked.setCurrentIndex(0))
@@ -140,3 +251,77 @@ class MainWindow(QMainWindow):
 
     async def _on_task_changed(self, event: RuntimeEvent) -> None:
         self.event_received.emit(event)
+
+    def showEvent(self, event: Any) -> None:
+        super().showEvent(event)
+        # Run health check on startup without blocking UI using QThread
+        self._run_system_health_check()
+
+    def _run_system_health_check(self) -> None:
+        from openclaw.plugins.ollama import OLLAMA_CLIENT_SERVICE, OllamaClient
+
+        try:
+            client = self._runtime.services.get(OLLAMA_CLIENT_SERVICE)
+        except LookupError:
+            self._status_lbl.setText("✓ System Active    ✗ Ollama server    ✗ AI [None]")
+            self._info_lbl.setText("Ollama plugin is not loaded.")
+            self._info_lbl.setStyleSheet("color: #ffb4ab; font-size: 11px; border: none;")
+            return
+
+        import typing
+        ollama = typing.cast(OllamaClient, client)
+
+        from PySide6.QtCore import QThread, Signal
+
+        class HealthCheckThread(QThread):
+            finished_check = Signal(bool, bool, list)
+            
+            def __init__(self, ollama_client: OllamaClient, parent: Any = None):
+                super().__init__(parent)
+                self.ollama = ollama_client
+                
+            def run(self) -> None:
+                has_ollama = self.ollama.check_ollama_availability()
+                server_up = False
+                models = []
+                if has_ollama:
+                    try:
+                        server_up = self.ollama.check_connection()
+                        if server_up:
+                            models = self.ollama.get_available_models()
+                    except Exception:
+                        pass
+                self.finished_check.emit(has_ollama, server_up, models)
+
+        self._health_thread = HealthCheckThread(ollama, self)
+        self._health_thread.finished_check.connect(self._on_health_check_done)
+        self._health_thread.start()
+
+    def _on_health_check_done(self, has_ollama: bool, server_up: bool, models: list[str]) -> None:
+        sys_str = "✓"
+        ollama_str = "✓" if has_ollama and server_up else ("✗" if not has_ollama else "!")
+        
+        model_name = "None"
+        if models:
+            if "gemma4:12b" in models:
+                model_name = "gemma4:12b"
+            else:
+                model_name = models[0]
+            ai_str = "✓"
+        else:
+            ai_str = "✗"
+
+        self._status_lbl.setText(f"{sys_str} System Active    {ollama_str} Ollama server    {ai_str} AI [{model_name}]")
+
+        if not has_ollama:
+            self._info_lbl.setText("Ollama is not installed or not in PATH.")
+            self._info_lbl.setStyleSheet("color: #ffb4ab; font-size: 11px; border: none;")
+        elif not server_up:
+            self._info_lbl.setText("Ollama is installed but the server is not running.")
+            self._info_lbl.setStyleSheet("color: #ffb595; font-size: 11px; border: none;")
+        elif not models:
+            self._info_lbl.setText("Ollama server is running, but no AI models are installed.")
+            self._info_lbl.setStyleSheet("color: #ffb595; font-size: 11px; border: none;")
+        else:
+            self._info_lbl.setText(f"System ready. Using model: {model_name}")
+            self._info_lbl.setStyleSheet("color: #adc6ff; font-size: 11px; border: none;")

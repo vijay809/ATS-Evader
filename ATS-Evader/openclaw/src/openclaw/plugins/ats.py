@@ -151,7 +151,8 @@ Respond ONLY with valid JSON matching this schema:
   "warnings": ["Could not match requirement A"]
 }}
 """
-        response = self._client.generate_sync(prompt, model=model_id)
+        import asyncio
+        response = asyncio.run(self._client.generate(prompt, model=model_id))
         try:
             return TailoredResume.model_validate_json(response.text)
         except Exception as e:
@@ -176,7 +177,8 @@ Respond ONLY with valid JSON matching this schema:
   "structured_json": "A stringified JSON representing the candidate's core skills, experience, and contact info"
 }}
 """
-        response = self._client.generate_sync(prompt, model=model_id)
+        import asyncio
+        response = asyncio.run(self._client.generate(prompt, model=model_id))
         try:
             return ParsedResumeData.model_validate_json(response.text)
         except Exception as e:
