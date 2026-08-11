@@ -154,7 +154,8 @@ Respond ONLY with valid JSON matching this schema:
         import asyncio
         response = asyncio.run(self._client.generate(prompt, model=model_id))
         try:
-            return TailoredResume.model_validate_json(response.text)
+            parsed_dict = AtsAnalyzer._parse_json(response.text)
+            return TailoredResume.model_validate(parsed_dict)
         except Exception as e:
             logger.error(f"Failed to parse tailored resume: {response.text}")
             raise AtsAnalysisError("Invalid tailor response from model") from e
@@ -180,7 +181,8 @@ Respond ONLY with valid JSON matching this schema:
         import asyncio
         response = asyncio.run(self._client.generate(prompt, model=model_id))
         try:
-            return ParsedResumeData.model_validate_json(response.text)
+            parsed_dict = AtsAnalyzer._parse_json(response.text)
+            return ParsedResumeData.model_validate(parsed_dict)
         except Exception as e:
             logger.error(f"Failed to parse master resume: {response.text}")
             raise AtsAnalysisError("Invalid parse response from model") from e

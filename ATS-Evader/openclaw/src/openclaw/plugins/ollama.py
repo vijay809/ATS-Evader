@@ -20,7 +20,7 @@ OLLAMA_CLIENT_SERVICE = "ollama.client"
 class OllamaSettings(BaseModel):
     base_url: str = "http://127.0.0.1:11434"
     default_model: str = "gemma4:12b"
-    timeout_seconds: float = Field(default=120.0, gt=0)
+    timeout_seconds: float = Field(default=600.0, gt=0)
 
 
 @dataclass(frozen=True, slots=True)

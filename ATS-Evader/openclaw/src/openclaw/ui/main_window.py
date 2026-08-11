@@ -6,7 +6,7 @@ import asyncio
 from datetime import UTC
 from uuid import UUID
 
-from PySide6.QtCore import Qt, QSize, QTimer, Signal
+from PySide6.QtCore import Qt, QSize, QTimer, Signal, QThread
 from PySide6.QtGui import QIcon, QAction
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -46,11 +46,21 @@ class SystemMonitorThread(QThread):
     def run(self) -> None:
         import time
         import psutil
-        try:
-            import GPUtil
-            has_gputil = True
-        except ImportError:
-            has_gputil = False
+        import subprocess
+
+        # Find nvidia-smi bypassing PATH issues
+        nvidia_smi_path = None
+        for path in [
+            "nvidia-smi",
+            r"C:\Windows\System32\nvidia-smi.exe",
+            r"C:\Program Files\NVIDIA Corporation\NVSMI\nvidia-smi.exe"
+        ]:
+            try:
+                subprocess.run([path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                nvidia_smi_path = path
+                break
+            except FileNotFoundError:
+                continue
 
         while not self.isInterruptionRequested():
             cpu = psutil.cpu_percent()
@@ -58,12 +68,22 @@ class SystemMonitorThread(QThread):
             gpu_load = 0.0
             vram_usage = 0.0
             
-            if has_gputil:
-                gpus = GPUtil.getGPUs()
-                if gpus:
-                    gpu = gpus[0]
-                    gpu_load = gpu.load * 100
-                    vram_usage = (gpu.memoryUsed / gpu.memoryTotal) * 100 if gpu.memoryTotal > 0 else 0.0
+            if nvidia_smi_path:
+                try:
+                    creationflags = subprocess.CREATE_NO_WINDOW if hasattr(subprocess, "CREATE_NO_WINDOW") else 0
+                    result = subprocess.run(
+                        [nvidia_smi_path, "--query-gpu=utilization.gpu,memory.used,memory.total", "--format=csv,noheader,nounits"],
+                        capture_output=True, text=True, creationflags=creationflags
+                    )
+                    if result.returncode == 0 and result.stdout.strip():
+                        parts = result.stdout.strip().split(',')
+                        if len(parts) >= 3:
+                            gpu_load = float(parts[0].strip())
+                            used_mem = float(parts[1].strip())
+                            total_mem = float(parts[2].strip())
+                            vram_usage = (used_mem / total_mem) * 100 if total_mem > 0 else 0.0
+                except Exception:
+                    pass
             
             self.metrics_updated.emit(cpu, ram, gpu_load, vram_usage)
             time.sleep(1.5)
@@ -181,32 +201,31 @@ class MainWindow(QMainWindow):
             container = QWidget()
             layout = QHBoxLayout(container)
             layout.setContentsMargins(0, 0, 0, 0)
-            layout.setSpacing(8)
-            lbl = QLabel(label_text)
-            lbl.setFixedWidth(40)
-            lbl.setStyleSheet("color: #8b90a0; font-size: 10px; font-weight: bold; border: none;")
+            layout.setSpacing(12)
+            
+            lbl = QLabel(f"{label_text} 0%")
+            lbl.setFixedWidth(65)
+            lbl.setStyleSheet("color: #8b90a0; font-size: 11px; font-weight: bold; border: none;")
+            
             pb = QProgressBar()
             pb.setTextVisible(False)
-            pb.setFixedHeight(6)
+            pb.setFixedHeight(12)
             pb.setStyleSheet("""
                 QProgressBar {
-                    background-color: #2a2a2a; border-radius: 3px;
+                    background-color: #2a2a2a; border-radius: 4px;
                 }
                 QProgressBar::chunk {
-                    background-color: #adc6ff; border-radius: 3px;
+                    background-color: #adc6ff; border-radius: 4px;
                 }
             """)
-            val_lbl = QLabel("0%")
-            val_lbl.setFixedWidth(30)
-            val_lbl.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-            val_lbl.setStyleSheet("color: #e5e2e1; font-size: 10px; border: none;")
+            
             layout.addWidget(lbl)
             layout.addWidget(pb, stretch=1)
-            layout.addWidget(val_lbl)
             
             # Store references to update later
             container.pb = pb
-            container.val_lbl = val_lbl
+            container.lbl = lbl
+            container.label_prefix = label_text
             return container
 
         self._cpu_widget = create_metric_widget("CPU")
@@ -230,24 +249,52 @@ class MainWindow(QMainWindow):
         self._monitor_thread.start()
 
     def _update_metrics(self, cpu: float, ram: float, gpu: float, vram: float) -> None:
-        self._cpu_widget.pb.setValue(int(cpu))
-        self._cpu_widget.val_lbl.setText(f"{int(cpu)}%")
-        self._ram_widget.pb.setValue(int(ram))
-        self._ram_widget.val_lbl.setText(f"{int(ram)}%")
-        self._gpu_widget.pb.setValue(int(gpu))
-        self._gpu_widget.val_lbl.setText(f"{int(gpu)}%")
-        self._vram_widget.pb.setValue(int(vram))
-        self._vram_widget.val_lbl.setText(f"{int(vram)}%")
+        def update_single_metric(widget: Any, new_val: float) -> None:
+            old_val = widget.pb.value()
+            int_val = int(new_val)
+            widget.pb.setValue(int_val)
+            widget.lbl.setText(f"{widget.label_prefix} {int_val}%")
+            
+            # Highlight jump > 5% (increasing or decreasing)
+            if abs(int_val - old_val) > 5:
+                widget.pb.setFixedHeight(14)
+                widget.pb.setStyleSheet("""
+                    QProgressBar {
+                        background-color: #2a2a2a; border-radius: 8px;
+                    }
+                    QProgressBar::chunk {
+                        background-color: #ffb595; border-radius: 8px;
+                    }
+                """)
+                
+                # Restore original style
+                def restore() -> None:
+                    widget.pb.setFixedHeight(12)
+                    widget.pb.setStyleSheet("""
+                        QProgressBar {
+                            background-color: #2a2a2a; border-radius: 4px;
+                        }
+                        QProgressBar::chunk {
+                            background-color: #adc6ff; border-radius: 4px;
+                        }
+                    """)
+                from PySide6.QtCore import QTimer
+                QTimer.singleShot(2000, restore)
 
-    def closeEvent(self, event: Any) -> None:
-        self._monitor_thread.requestInterruption()
-        self._monitor_thread.wait()
-        super().closeEvent(event)
+        update_single_metric(self._cpu_widget, cpu)
+        update_single_metric(self._ram_widget, ram)
+        update_single_metric(self._gpu_widget, gpu)
+        update_single_metric(self._vram_widget, vram)
 
         # Connections
         self._btn_setup.clicked.connect(lambda: self._stacked.setCurrentIndex(0))
         self._btn_process.clicked.connect(lambda: self._stacked.setCurrentIndex(1))
         self._btn_history.clicked.connect(lambda: self._stacked.setCurrentIndex(2))
+
+    def closeEvent(self, event: Any) -> None:
+        self._monitor_thread.requestInterruption()
+        self._monitor_thread.wait()
+        super().closeEvent(event)
 
     async def _on_task_changed(self, event: RuntimeEvent) -> None:
         self.event_received.emit(event)
