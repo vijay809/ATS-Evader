@@ -34,6 +34,8 @@ class StructuredResumeRecord(SQLModel, table=True):
     name: str
     raw_content: str
     parsed_json: str
+    is_active: bool = False
+    created_at: float = 0.0
 
 class PreferenceRecord(SQLModel, table=True):
     id: str = Field(primary_key=True)
@@ -85,6 +87,10 @@ class DocumentRepository(Protocol):
     
     def get_resume(self, resume_id: str) -> Resume | None: ...
     def get_structured_resume(self) -> StructuredResume | None: ...
+    def get_active_structured_resume(self) -> StructuredResume | None: ...
+    def list_structured_resumes(self) -> Iterable[StructuredResume]: ...
+    def set_active_structured_resume(self, resume_id: str) -> None: ...
+    def delete_structured_resume(self, resume_id: str) -> None: ...
     def get_preferences(self) -> Iterable[Preference]: ...
     def get_job_description(self, jd_id: str) -> JobDescription | None: ...
     def list_resumes(self) -> Iterable[Resume]: ...
@@ -142,7 +148,10 @@ class SQLiteDocumentRepository:
             session.commit()
 
     def save_structured_resume(self, resume: StructuredResume) -> None:
-        record = StructuredResumeRecord(id=str(resume.id), name=resume.name, raw_content=resume.raw_content, parsed_json=resume.parsed_json)
+        record = StructuredResumeRecord(
+            id=str(resume.id), name=resume.name, raw_content=resume.raw_content, 
+            parsed_json=resume.parsed_json, is_active=resume.is_active, created_at=resume.created_at
+        )
         with Session(self._engine) as session:
             session.merge(record)
             session.commit()
@@ -197,13 +206,44 @@ class SQLiteDocumentRepository:
             return Resume(id=UUID(record.id), name=record.name, content=record.content)
 
     def get_structured_resume(self) -> StructuredResume | None:
+        return self.get_active_structured_resume()
+
+    def get_active_structured_resume(self) -> StructuredResume | None:
         from uuid import UUID
         from openclaw.core.documents import StructuredResume
         with Session(self._engine) as session:
-            record = session.exec(select(StructuredResumeRecord)).first()
+            record = session.exec(select(StructuredResumeRecord).where(StructuredResumeRecord.is_active == True)).first()
+            if not record:
+                record = session.exec(select(StructuredResumeRecord).order_by(StructuredResumeRecord.created_at.desc())).first()
             if not record:
                 return None
-            return StructuredResume(id=UUID(record.id), name=record.name, raw_content=record.raw_content, parsed_json=record.parsed_json)
+            return StructuredResume(id=UUID(record.id), name=record.name, raw_content=record.raw_content, parsed_json=record.parsed_json, is_active=record.is_active, created_at=record.created_at)
+
+    def list_structured_resumes(self) -> Iterable[StructuredResume]:
+        from uuid import UUID
+        from openclaw.core.documents import StructuredResume
+        with Session(self._engine) as session:
+            records = session.exec(select(StructuredResumeRecord).order_by(StructuredResumeRecord.created_at.desc())).all()
+        return tuple(StructuredResume(id=UUID(r.id), name=r.name, raw_content=r.raw_content, parsed_json=r.parsed_json, is_active=r.is_active, created_at=r.created_at) for r in records)
+
+    def set_active_structured_resume(self, resume_id: str) -> None:
+        with Session(self._engine) as session:
+            all_records = session.exec(select(StructuredResumeRecord)).all()
+            for r in all_records:
+                r.is_active = False
+                session.add(r)
+            target = session.get(StructuredResumeRecord, resume_id)
+            if target:
+                target.is_active = True
+                session.add(target)
+            session.commit()
+
+    def delete_structured_resume(self, resume_id: str) -> None:
+        with Session(self._engine) as session:
+            target = session.get(StructuredResumeRecord, resume_id)
+            if target:
+                session.delete(target)
+                session.commit()
 
     def get_preferences(self) -> Iterable[Preference]:
         from uuid import UUID

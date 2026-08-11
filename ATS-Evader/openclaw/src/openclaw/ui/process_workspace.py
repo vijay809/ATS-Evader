@@ -101,6 +101,10 @@ class ProcessWorkspace(QWidget):
         main_layout.addWidget(splitter)
         self.refresh_preferences()
 
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        self.refresh_preferences()
+
     def refresh_preferences(self) -> None:
         """Load preferences from SQLite and display them in the sidebar."""
         # Clear existing
@@ -110,16 +114,27 @@ class ProcessWorkspace(QWidget):
                 child.widget().deleteLater()
 
         try:
-            prefs = self._runtime.plugins._context.documents.get_preferences()
-            for pref in prefs:
+            import json
+            active_resume = self._runtime.plugins._context.documents.get_active_structured_resume()
+            if not active_resume:
+                return
+            
+            parsed = json.loads(active_resume.parsed_json)
+            if isinstance(parsed, dict) and "preferences" in parsed:
+                prefs = parsed["preferences"]
+            else:
+                # Fallback to global DB preferences for older parses
+                prefs = {p.key: p.value for p in self._runtime.plugins._context.documents.get_preferences()}
+                
+            for k, v in prefs.items():
                 card = QFrame()
                 card.setStyleSheet("background-color: #2a2a2a; border-radius: 8px; padding: 12px; border: none;")
                 card_layout = QVBoxLayout(card)
                 card_layout.setContentsMargins(0,0,0,0)
                 
-                k_lbl = QLabel(pref.key.upper())
+                k_lbl = QLabel(k.upper())
                 k_lbl.setStyleSheet("color: #8b90a0; font-size: 10px; font-weight: bold; font-family: monospace; border: none;")
-                v_lbl = QLabel(pref.value)
+                v_lbl = QLabel(v)
                 v_lbl.setStyleSheet("color: white; font-size: 14px; border: none;")
                 
                 card_layout.addWidget(k_lbl)

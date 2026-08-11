@@ -18,6 +18,8 @@ class StructuredResume:
     raw_content: str
     parsed_json: str
     name: str = "Master Resume"
+    is_active: bool = False
+    created_at: float = field(default_factory=lambda: __import__('time').time())
     id: UUID = field(default_factory=uuid4)
 
 

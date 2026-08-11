@@ -171,6 +171,7 @@ Extract the core details and implicit preferences from this raw resume text.
 Respond ONLY with valid JSON matching this schema:
 {{
   "preferences": {{
+    "Candidate Name": "E.g. Alex Rivera",
     "Target Role": "E.g. Senior Software Engineer",
     "Location": "E.g. Remote or specific city",
     "Min Years Exp": "E.g. 5"
