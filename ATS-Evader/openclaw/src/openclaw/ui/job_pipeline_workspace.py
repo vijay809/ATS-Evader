@@ -32,13 +32,12 @@ if TYPE_CHECKING:
 
 
 class JobPipelineWorkspace(QWidget):
-    """Dashboard for tracking and applying to extracted jobs."""
+    """Dashboard for tracking and applying to extracted jobs using a Kanban board."""
 
     def __init__(self, runtime: Runtime) -> None:
         super().__init__()
         self._runtime = runtime
         self._worker: QThread | None = None
-        self._task_id: UUID | None = None
         
         # Resume Selector
         self._resume_selector = QComboBox()
@@ -47,15 +46,6 @@ class JobPipelineWorkspace(QWidget):
         self._refresh_btn = QPushButton("Refresh Data")
         self._refresh_btn.clicked.connect(self._refresh_data)
         
-        # Job Table
-        self._job_table = QTableWidget()
-        self._job_table.setColumnCount(5)
-        self._job_table.setHorizontalHeaderLabels(["Company", "Title", "ATS Score", "Status", "Actions"])
-        self._job_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
-        self._job_table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
-        self._job_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
-        self._job_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
-        
         top_layout = QHBoxLayout()
         top_layout.addWidget(QLabel("Master Resume:"))
         top_layout.addWidget(self._resume_selector, stretch=1)
@@ -63,8 +53,37 @@ class JobPipelineWorkspace(QWidget):
         
         layout = QVBoxLayout(self)
         layout.addLayout(top_layout)
-        layout.addWidget(QLabel("Extracted Jobs:"))
-        layout.addWidget(self._job_table)
+        
+        # Kanban Board Layout
+        self._kanban_layout = QHBoxLayout()
+        self.columns = {}
+        
+        for col_name in ["Analyzed", "Applying", "Applied", "Skipped"]:
+            col_widget = QWidget()
+            col_widget.setStyleSheet("background-color: #1a1a1a; border-radius: 8px; border: 1px solid #333;")
+            col_layout = QVBoxLayout(col_widget)
+            col_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
+            
+            header = QLabel(col_name)
+            header.setStyleSheet("font-size: 18px; font-weight: bold; color: #adc6ff; padding: 8px; border: none;")
+            col_layout.addWidget(header)
+            
+            scroll = QScrollArea()
+            scroll.setWidgetResizable(True)
+            scroll.setStyleSheet("border: none; background: transparent;")
+            
+            inner_widget = QWidget()
+            inner_widget.setStyleSheet("background: transparent;")
+            inner_layout = QVBoxLayout(inner_widget)
+            inner_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
+            scroll.setWidget(inner_widget)
+            
+            col_layout.addWidget(scroll)
+            
+            self._kanban_layout.addWidget(col_widget)
+            self.columns[col_name] = inner_layout
+            
+        layout.addLayout(self._kanban_layout)
         
         self._status = QLabel("Ready.")
         layout.addWidget(self._status)
@@ -82,180 +101,89 @@ class JobPipelineWorkspace(QWidget):
 
     def _refresh_data(self) -> None:
         self._refresh_resumes()
-        self._job_table.setRowCount(0)
         
+        # Clear Kanban columns
+        for layout in self.columns.values():
+            while layout.count():
+                child = layout.takeAt(0)
+                if child.widget():
+                    child.widget().deleteLater()
+                    
         try:
             jobs = self._runtime.plugins._context.documents.list_job_descriptions()
-            for row, job in enumerate(jobs):
-                self._job_table.insertRow(row)
-                
-                # We attempt to extract Title and Company from the name if formatted as 'Title at Company'
-                # But JobDescription.name doesn't strictly enforce this. By default extract_naukri_jd creates a specific name?
-                # Let's just use the job name for Title, or split it.
+            for job in jobs:
                 title = job.name
                 company = "Unknown"
                 if " at " in job.name:
                     parts = job.name.split(" at ", 1)
                     title, company = parts[0], parts[1]
                     
-                self._job_table.setItem(row, 0, QTableWidgetItem(company))
-                self._job_table.setItem(row, 1, QTableWidgetItem(title))
-                
-                # Fetch ATS Score
                 latest_analysis = self._runtime.plugins._context.documents.get_latest_analysis(str(job.id))
-                score_str = f"{latest_analysis.match_score}/100" if latest_analysis else "N/A"
-                self._job_table.setItem(row, 2, QTableWidgetItem(score_str))
+                score_str = f"{latest_analysis.match_score}%" if latest_analysis else "N/A"
                 
-                self._job_table.setItem(row, 3, QTableWidgetItem(job.status))
+                # Determine target column
+                status = job.status
+                if status not in self.columns:
+                    # Map unknown statuses to Analyzed or Skipped
+                    status = "Analyzed"
+                    
+                target_layout = self.columns[status]
                 
-                # Actions Widget
-                action_widget = QWidget()
-                action_layout = QHBoxLayout(action_widget)
-                action_layout.setContentsMargins(2, 2, 2, 2)
+                # Build Card
+                from PySide6.QtWidgets import QFrame
+                card = QFrame()
+                card.setStyleSheet("background-color: #2a2a2a; border-radius: 6px; border: 1px solid #444; margin-bottom: 8px;")
+                card_layout = QVBoxLayout(card)
                 
-                analyze_btn = QPushButton("Analyze")
-                analyze_btn.clicked.connect(lambda checked=False, j_id=job.id: self._analyze_job(j_id))
+                title_lbl = QLabel(title)
+                title_lbl.setStyleSheet("font-weight: bold; color: white; font-size: 14px; border: none;")
+                title_lbl.setWordWrap(True)
                 
-                tailor_btn = QPushButton("Tailor")
-                tailor_btn.clicked.connect(lambda checked=False, j_id=job.id: self._tailor_job(j_id))
+                comp_lbl = QLabel(f"{company} | Score: {score_str}")
+                comp_lbl.setStyleSheet("color: #aaa; font-size: 12px; border: none;")
                 
-                apply_btn = QPushButton("Apply (Agent)")
-                apply_btn.clicked.connect(lambda checked=False, j_id=job.id: self._apply_job(j_id))
+                card_layout.addWidget(title_lbl)
+                card_layout.addWidget(comp_lbl)
                 
-                action_layout.addWidget(analyze_btn)
-                action_layout.addWidget(tailor_btn)
-                action_layout.addWidget(apply_btn)
+                # Actions based on status
+                action_layout = QHBoxLayout()
                 
-                self._job_table.setCellWidget(row, 4, action_widget)
+                if job.url:
+                    open_btn = QPushButton("Open Link")
+                    open_btn.setStyleSheet("background-color: #333; color: white; border-radius: 4px; padding: 4px;")
+                    open_btn.clicked.connect(lambda checked=False, u=job.url: self._open_url(u))
+                    action_layout.addWidget(open_btn)
+                
+                if status == "Analyzed":
+                    apply_btn = QPushButton("Apply")
+                    apply_btn.setStyleSheet("background-color: #4b8eff; color: white; border-radius: 4px; padding: 4px;")
+                    apply_btn.clicked.connect(lambda checked=False, j=job: self._move_job(j, "Applying"))
+                    action_layout.addWidget(apply_btn)
+                    
+                    skip_btn = QPushButton("Skip")
+                    skip_btn.setStyleSheet("background-color: #555; color: white; border-radius: 4px; padding: 4px;")
+                    skip_btn.clicked.connect(lambda checked=False, j=job: self._move_job(j, "Skipped"))
+                    action_layout.addWidget(skip_btn)
+                    
+                elif status == "Applying":
+                    done_btn = QPushButton("Mark Applied")
+                    done_btn.setStyleSheet("background-color: #3b5a4b; color: white; border-radius: 4px; padding: 4px;")
+                    done_btn.clicked.connect(lambda checked=False, j=job: self._move_job(j, "Applied"))
+                    action_layout.addWidget(done_btn)
+                
+                if action_layout.count() > 0:
+                    card_layout.addLayout(action_layout)
+                    
+                target_layout.addWidget(card)
+                
         except AttributeError:
             self._status.setText("Database is not ready.")
 
-    def _get_selected_resume(self) -> Resume | None:
-        idx = self._resume_selector.currentIndex()
-        if idx < 0:
-            return None
-        r_id = self._resume_selector.itemData(idx)
-        return self._runtime.plugins._context.documents.get_resume(str(r_id))
-
-    def _analyze_job(self, job_id: UUID) -> None:
-        resume = self._get_selected_resume()
-        if not resume:
-            QMessageBox.warning(self, "Error", "Please import and select a Master Resume first.")
-            return
-            
-        job = self._runtime.plugins._context.documents.get_job_description(str(job_id))
-        if not job:
-            return
-            
-        try:
-            analyzer = self._runtime.services.get(ATS_ANALYZER_SERVICE)
-        except LookupError:
-            self._status.setText("ATS plugin is unavailable.")
-            return
-
-        self._status.setText(f"Analyzing {job.name}...")
-        self._worker = AtsWorker(cast(AtsAnalyzer, analyzer), resume.content, job.content, "gemma4:12b")
-        # Overriding completed to persist correctly
-        self._worker.completed.connect(lambda res: self._on_analysis_complete(res, resume, job))
-        self._worker.failed.connect(lambda err: self._status.setText(f"Analysis Failed: {err}"))
-        self._worker.start()
-
-    def _on_analysis_complete(self, result: object, resume: Resume, jd: JobDescription) -> None:
-        if not hasattr(result, "match_score"):
-            return
-            
-        analysis_result = cast(AtsAnalysis, result)
-        record = AnalysisResult(
-            resume_id=resume.id,
-            job_id=jd.id,
-            match_score=analysis_result.match_score,
-            matched_keywords=",".join(analysis_result.matched_keywords),
-            missing_keywords=",".join(analysis_result.missing_keywords),
-            recommendations="\n".join(analysis_result.recommendations),
-            summary=analysis_result.summary
-        )
-        self._runtime.plugins._context.documents.save_analysis(record)
-        
-        # Update status and refresh table
-        jd.status = "Analyzed"
-        self._runtime.plugins._context.documents.save_job_description(jd)
-        self._status.setText(f"Analysis complete for {jd.name}: Score {analysis_result.match_score}")
+    def _move_job(self, job: JobDescription, new_status: str) -> None:
+        job.status = new_status
+        self._runtime.plugins._context.documents.save_job_description(job)
         self._refresh_data()
 
-    def _tailor_job(self, job_id: UUID) -> None:
-        resume = self._get_selected_resume()
-        if not resume:
-            QMessageBox.warning(self, "Error", "Please select a Master Resume.")
-            return
-            
-        job = self._runtime.plugins._context.documents.get_job_description(str(job_id))
-        if not job:
-            return
-            
-        try:
-            analyzer = self._runtime.services.get(ATS_ANALYZER_SERVICE)
-        except LookupError:
-            self._status.setText("ATS plugin is unavailable.")
-            return
-
-        self._status.setText(f"Tailoring {job.name}...")
-        self._worker = TailorWorker(cast(AtsAnalyzer, analyzer), resume.content, job.content, "gemma4:12b")
-        self._worker.completed.connect(lambda res: self._on_tailor_complete(res, resume, job))
-        self._worker.failed.connect(lambda err: self._status.setText(f"Tailoring Failed: {err}"))
-        self._worker.start()
-
-    def _on_tailor_complete(self, result: object, resume: Resume, jd: JobDescription) -> None:
-        if not hasattr(result, "tailored_resume"):
-            return
-            
-        tailored_result = cast(TailoredResume, result)
-        dialog = TailorReviewDialog(resume.content, tailored_result, self)
-        if dialog.exec():
-            final_content = dialog.tailored_text.toPlainText()
-            from openclaw.core.documents import TailoredDraft
-            draft = TailoredDraft(
-                resume_id=resume.id,
-                job_id=jd.id,
-                content=final_content,
-                change_summary=",".join(tailored_result.change_summary),
-                warnings=",".join(tailored_result.warnings)
-            )
-            self._runtime.plugins._context.documents.save_draft(draft)
-            
-            jd.status = "Tailored"
-            self._runtime.plugins._context.documents.save_job_description(jd)
-            self._status.setText(f"Saved tailored resume for {jd.name}.")
-            self._refresh_data()
-        else:
-            self._status.setText("Tailored resume discarded.")
-
-    def _apply_job(self, job_id: UUID) -> None:
-        # In a full continuous loop, this would orchestrate SemanticNavigator repeatedly.
-        # For this prototype step, we open the URL in the browser.
-        job = self._runtime.plugins._context.documents.get_job_description(str(job_id))
-        if not job or not job.url:
-            QMessageBox.warning(self, "Error", "Job URL is not available. Please navigate manually.")
-            return
-            
-        try:
-            from openclaw.plugins.browser import BrowserService, BROWSER_SERVICE
-            browser = self._runtime.services.get(BROWSER_SERVICE)
-            if isinstance(browser, BrowserService):
-                task = asyncio.run(self._runtime.tasks.create(f"Applying to {job.name}"))
-                asyncio.run(self._runtime.tasks.transition(task.id, TaskStatus.RUNNING, "Opening browser..."))
-                
-                # Launch async
-                def run_launch() -> None:
-                    asyncio.run(browser.launch(job.url))
-                    
-                import threading
-                t = threading.Thread(target=run_launch)
-                t.start()
-                
-                job.status = "Applying"
-                self._runtime.plugins._context.documents.save_job_description(job)
-                self._refresh_data()
-                self._status.setText(f"Opening {job.url} in browser...")
-                asyncio.run(self._runtime.tasks.transition(task.id, TaskStatus.SUCCEEDED, "Browser launched"))
-        except LookupError:
-            self._status.setText("Browser plugin is unavailable.")
+    def _open_url(self, url: str) -> None:
+        import webbrowser
+        webbrowser.open(url)

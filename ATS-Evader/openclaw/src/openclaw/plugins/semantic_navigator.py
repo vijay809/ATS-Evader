@@ -57,6 +57,38 @@ class SemanticNavigator:
         self._ollama = ollama_client
         self._browser = browser_service
 
+    async def execute_goal(self, goal: str, max_steps: int = 10, emit_cb=None) -> SemanticResult:
+        """Continuously executes commands until the goal is achieved or max_steps is reached."""
+        last_reasoning = ""
+        for step in range(max_steps):
+            if emit_cb:
+                emit_cb(f"Step {step+1}/{max_steps}: Analyzing current page state...")
+                
+            result = await self.execute_command(goal)
+            
+            if emit_cb:
+                if result.error:
+                    emit_cb(f"Error: {result.error}")
+                else:
+                    emit_cb(f"Reasoning: {result.reasoning}")
+                    emit_cb(f"Taking action: {result.action}")
+            
+            if not result.success:
+                return result
+                
+            if result.action.upper().strip() == "DONE":
+                if emit_cb:
+                    emit_cb("Goal completed successfully!")
+                return result
+                
+            last_reasoning = result.reasoning
+            # Wait for any navigation or DOM updates
+            await asyncio.sleep(2)
+            
+        if emit_cb:
+            emit_cb("Max steps reached before completion.")
+        return SemanticResult(reasoning=last_reasoning, action="TIMEOUT", success=False, error="Max steps reached.")
+
     async def execute_command(self, command: str) -> SemanticResult:
         """Executes a single natural language command on the current browser page."""
         page = self._browser.page

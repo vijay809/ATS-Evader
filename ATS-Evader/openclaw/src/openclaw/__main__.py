@@ -10,7 +10,24 @@ from openclaw.core.runtime import Runtime
 from openclaw.ui.main_window import MainWindow
 
 
+import logging
+from pathlib import Path
+
+def setup_logging():
+    log_dir = Path.home() / ".openclaw" / "logs"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+        handlers=[
+            logging.FileHandler(log_dir / "openclaw.log"),
+            logging.StreamHandler(sys.stdout)
+        ]
+    )
+
 def main() -> int:
+    setup_logging()
     runtime = Runtime(RuntimeSettings())
     asyncio.run(runtime.start())
     app = QApplication(sys.argv)

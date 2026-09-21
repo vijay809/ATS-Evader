@@ -7,6 +7,7 @@ import logging
 import threading
 import concurrent.futures
 from collections.abc import Callable
+from pathlib import Path
 
 from playwright.async_api import Browser, BrowserContext, Page, Playwright, async_playwright
 from playwright_stealth import Stealth  # type: ignore[import-untyped]
@@ -42,36 +43,34 @@ class BrowserService:
         self._browser_context = None
         self._browser = None
 
-    async def _launch_impl(self, url: str | None) -> None:
-        if self._browser is not None and not self._browser.is_connected():
-            self._page = None
-            self._browser_context = None
-            self._browser = None
-            
-        if self._browser is not None:
+    async def _launch_impl(self, url: str | None, win_x: int = 0, win_y: int = 0, win_w: int = 1280, win_h: int = 800) -> None:
+        if self._browser_context is not None:
             if self._page is None or self._page.is_closed():
-                if self._browser_context is None:
-                    # fallback if context was lost
-                    self._browser_context = await self._browser.new_context(
-                        viewport={"width": 1280, "height": 800},
-                        user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
-                    )
                 self._page = await self._browser_context.new_page()
                 stealth = Stealth()
                 await stealth.apply_stealth_async(self._page)
-                
             if url:
                 await self._page.goto(url)
             return
 
         self._playwright = await async_playwright().start()
-        self._browser = await self._playwright.chromium.launch(headless=False)
-        self._browser.on("disconnected", self._on_disconnected)
-        self._browser_context = await self._browser.new_context(
-            viewport={"width": 1280, "height": 800},
+        profile_path = Path.home() / ".openclaw" / "browser_profile"
+        profile_path.mkdir(parents=True, exist_ok=True)
+        
+        self._browser_context = await self._playwright.chromium.launch_persistent_context(
+            user_data_dir=str(profile_path),
+            headless=False,
+            viewport={"width": win_w, "height": win_h},
+            args=[f"--window-position={win_x},{win_y}", f"--window-size={win_w},{win_h}"],
             user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
         )
-        self._page = await self._browser_context.new_page()
+        self._browser_context.on("close", lambda ctx: self._on_disconnected(None))
+        
+        if self._browser_context.pages:
+            self._page = self._browser_context.pages[0]
+        else:
+            self._page = await self._browser_context.new_page()
+            
         stealth = Stealth()
         await stealth.apply_stealth_async(self._page)
         
@@ -89,10 +88,6 @@ class BrowserService:
         if self._browser_context:
             await self._browser_context.close()
             self._browser_context = None
-        if self._browser:
-            self._browser.remove_listener("disconnected", self._on_disconnected)
-            await self._browser.close()
-            self._browser = None
         if self._playwright:
             await self._playwright.stop()
             self._playwright = None
@@ -100,6 +95,17 @@ class BrowserService:
     async def close(self) -> None:
         future = asyncio.run_coroutine_threadsafe(self._close_impl(), self._loop)
         await asyncio.wrap_future(future)
+
+    async def _reset_session_impl(self) -> None:
+        await self._close_impl()
+        import shutil
+        profile_path = Path.home() / ".openclaw" / "browser_profile"
+        if profile_path.exists():
+            shutil.rmtree(profile_path, ignore_errors=True)
+
+    def reset_session(self) -> None:
+        future = asyncio.run_coroutine_threadsafe(self._reset_session_impl(), self._loop)
+        return future.result()
 
     @property
     def page(self) -> Page | None:
@@ -129,6 +135,29 @@ class BrowserService:
 
     async def extract_naukri_jd(self, url: str) -> dict[str, str]:
         future = asyncio.run_coroutine_threadsafe(self._extract_naukri_jd_impl(url), self._loop)
+        return await asyncio.wrap_future(future)
+
+    async def _search_naukri_jobs_impl(self, role: str, location: str, max_results: int = 3, win_x: int = 0, win_y: int = 0, win_w: int = 1280, win_h: int = 800) -> list[str]:
+        if not self._page or self._page.is_closed():
+            await self._launch_impl(None, win_x, win_y, win_w, win_h)
+            
+        role_slug = role.replace(" ", "-").lower()
+        loc_slug = location.replace(" ", "-").lower()
+        url = f"https://www.naukri.com/{role_slug}-jobs-in-{loc_slug}"
+        
+        await self._page.goto(url, wait_until="domcontentloaded")
+        await asyncio.sleep(3) # Wait for page to render
+        
+        links = []
+        locators = await self._page.locator("a.title").all()
+        for loc in locators[:max_results]:
+            href = await loc.get_attribute("href")
+            if href:
+                links.append(href)
+        return links
+
+    async def search_naukri_jobs(self, role: str, location: str, max_results: int = 3, win_x: int = 0, win_y: int = 0, win_w: int = 1280, win_h: int = 800) -> list[str]:
+        future = asyncio.run_coroutine_threadsafe(self._search_naukri_jobs_impl(role, location, max_results, win_x, win_y, win_w, win_h), self._loop)
         return await asyncio.wrap_future(future)
 
     def stop_thread(self) -> None:
