@@ -27,7 +27,7 @@ from openclaw.core.documents import JobDescription, Resume, AnalysisResult
 from openclaw.core.runtime import Runtime
 from openclaw.core.tasks import TaskStatus
 from openclaw.plugins.ats import ATS_ANALYZER_SERVICE, AtsAnalyzer, AtsAnalysis, TailoredResume
-from openclaw.ui.ats_workspace import TailorReviewDialog, TailorWorker, AtsWorker
+
 
 if TYPE_CHECKING:
     pass
