@@ -15,6 +15,7 @@ dependencies = [
     "sqlmodel>=0.0.21",
     "psutil>=5.9.8",
     "GPUtil>=1.4.0",
+    "markdown>=3.10.3",
 ]
 
 [project.optional-dependencies]

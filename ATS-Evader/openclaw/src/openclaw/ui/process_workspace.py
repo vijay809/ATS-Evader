@@ -33,10 +33,11 @@ class JobHuntWorker(QThread):
     error = Signal(str)
     finished = Signal()
 
-    def __init__(self, browser_service: BrowserService, ats_analyzer: AtsAnalyzer, active_resume: str, role: str, location: str, min_exp: int, win_x: int = 0, win_y: int = 0, win_w: int = 1280, win_h: int = 800):
+    def __init__(self, browser_service: BrowserService, ats_analyzer: AtsAnalyzer, navigator: object, active_resume: str, role: str, location: str, min_exp: int, win_x: int = 0, win_y: int = 0, win_w: int = 1280, win_h: int = 800):
         super().__init__()
         self.browser = browser_service
         self.analyzer = ats_analyzer
+        self.navigator = navigator
         self.active_resume = active_resume
         self.role = role
         self.location = location
@@ -110,6 +111,46 @@ class JobHuntWorker(QThread):
                     
                 analysis = analysis_task.result()
                 
+                status = "Analyzed"
+                if analysis.match_score >= 80:
+                    self.agent_message.emit(f"Score {analysis.match_score}% meets threshold! Tailoring CV...")
+                    tailor_task = asyncio.create_task(self.analyzer.tailor_resume(self.active_resume, jd['description']))
+                    while not tailor_task.done():
+                        if not self.browser.page or self.browser.page.is_closed():
+                            tailor_task.cancel()
+                            raise RuntimeError("Browser was closed by the user.")
+                        await asyncio.sleep(1)
+                        
+                    tailored = tailor_task.result()
+                    self.agent_message.emit("CV Tailored! Generating PDF...")
+                    
+                    import os
+                    from openclaw.core.pdf_gen import PdfGenerator
+                    import uuid
+                    
+                    job_id = str(uuid.uuid4())
+                    pdf_path = os.path.join(os.getcwd(), "outputs", "resumes", f"cv_{job_id[:8]}.pdf")
+                    pdf_path = await PdfGenerator.markdown_to_pdf(tailored.tailored_resume, pdf_path)
+                    
+                    self.agent_message.emit(f"PDF Generated at: {pdf_path}")
+                    self.agent_message.emit("Triggering Autonomous Apply...")
+                    
+                    def stream_callback(msg: str):
+                        self.agent_message.emit(msg)
+                        
+                    cmd = "Apply to this job. The tailored resume is ready. If asked to upload, just upload it and consider it uploaded. Then submit."
+                    nav_result = await self.navigator.execute_goal(cmd, max_steps=15, emit_cb=stream_callback, cv_path=pdf_path)
+                    
+                    if nav_result.success:
+                        self.agent_message.emit(f"Successfully applied to {jd['title']}!")
+                        status = "Applied"
+                    else:
+                        self.agent_message.emit(f"Failed to apply to {jd['title']}. Error: {nav_result.error}")
+                        status = "Skipped"
+                else:
+                    self.agent_message.emit(f"Skipping '{jd['title']}' - Score {analysis.match_score}% is below 80%.")
+                    status = "Skipped"
+                
                 job = ImportedJob(
                     jd['title'],
                     jd['company'],
@@ -119,6 +160,7 @@ class JobHuntWorker(QThread):
                     analysis.summary,
                     analysis.recommendations
                 )
+                job.status = status
                 self.job_found.emit(job)
                 
             self.agent_message.emit("Automated search complete. Awaiting further instructions.")
@@ -506,6 +548,7 @@ class ProcessWorkspace(QWidget):
             
             browser = self._runtime.services.get(BROWSER_SERVICE)
             analyzer = self._runtime.services.get(ATS_ANALYZER_SERVICE)
+            navigator = self._runtime.services.get("browser.navigator")
             
             if not isinstance(browser, BrowserService) or not isinstance(analyzer, AtsAnalyzer):
                 self._add_notice("Browser or ATS capability is not configured correctly.")
@@ -529,7 +572,7 @@ class ProcessWorkspace(QWidget):
             self.add_agent_message(f"Beginning automated job hunt for '{role}' in '{location}'...")
             
             self._worker = JobHuntWorker(
-                browser, analyzer, active_resume.raw_content, role, location, min_exp,
+                browser, analyzer, navigator, active_resume.raw_content, role, location, min_exp,
                 win_x=avail_geo.x() + w, win_y=y_pos, win_w=w, win_h=h
             )
             self._worker.agent_message.connect(self.add_agent_message)
@@ -550,10 +593,12 @@ class ProcessWorkspace(QWidget):
         if not isinstance(result, ImportedJob):
             self._on_worker_failed("The imported job has an unexpected format.")
             return
+        status = getattr(result, "status", "Analyzed")
+        
         job = JobDescription(
             name=f"{result.title} at {result.company}",
             content=result.description,
-            status="Analyzed",
+            status=status,
             url=result.url,
         )
         self._runtime.plugins._context.documents.save_job_description(job)

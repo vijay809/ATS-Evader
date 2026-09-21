@@ -27,6 +27,7 @@ Your goal is to choose the single best action to execute the User Command.
 You MUST respond with EXACTLY ONE action formatted like this:
 CLICK <id>
 TYPE <id> "<text>"
+UPLOAD <id>
 DONE
 
 Example 1:
@@ -38,6 +39,10 @@ Reasoning: The user wants to search for 'Python'. I will type it into the search
 Action: TYPE 12 "Python"
 
 Example 3:
+Reasoning: I need to upload my resume to the file input.
+Action: UPLOAD 22
+
+Example 4:
 Reasoning: The task is complete.
 Action: DONE
 
@@ -56,9 +61,11 @@ class SemanticNavigator:
     def __init__(self, ollama_client: OllamaClient, browser_service: BrowserService) -> None:
         self._ollama = ollama_client
         self._browser = browser_service
+        self._current_cv_path: str | None = None
 
-    async def execute_goal(self, goal: str, max_steps: int = 10, emit_cb=None) -> SemanticResult:
+    async def execute_goal(self, goal: str, max_steps: int = 10, emit_cb=None, cv_path: str | None = None) -> SemanticResult:
         """Continuously executes commands until the goal is achieved or max_steps is reached."""
+        self._current_cv_path = cv_path
         last_reasoning = ""
         context = ""
         for step in range(max_steps):
@@ -159,6 +166,15 @@ class SemanticNavigator:
             agent_id = match.group(1)
             text = match.group(2).strip("\"'") # Strip quotes if LLM added them
             await page.locator(f'[data-agent-id="{agent_id}"]').fill(text, timeout=3000, force=True)
+            
+        elif action.upper().startswith("UPLOAD"):
+            match = re.search(r"UPLOAD\s+(\d+)", action, re.IGNORECASE)
+            if not match:
+                raise ValueError("UPLOAD requires a numeric ID")
+            agent_id = match.group(1)
+            if not self._current_cv_path:
+                raise ValueError("UPLOAD action requested but no cv_path was provided to the navigator.")
+            await page.locator(f'[data-agent-id="{agent_id}"]').set_input_files(self._current_cv_path)
             
         elif action.upper().strip() == "DONE":
             pass
