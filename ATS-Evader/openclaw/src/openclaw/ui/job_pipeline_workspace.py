@@ -16,6 +16,8 @@ from PySide6.QtWidgets import (
     QPushButton,
     QTableWidget,
     QTableWidgetItem,
+    QScrollArea,
+    QFrame,
     QVBoxLayout,
     QWidget,
     QMessageBox,

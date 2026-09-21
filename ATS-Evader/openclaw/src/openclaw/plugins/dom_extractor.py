@@ -80,4 +80,4 @@ class DOMExtractor:
         if len(lines) == 2:
             lines.append("- (No interactive elements found)")
             
-        return "\\n".join(lines)
+        return "\n".join(lines)

@@ -60,11 +60,12 @@ class SemanticNavigator:
     async def execute_goal(self, goal: str, max_steps: int = 10, emit_cb=None) -> SemanticResult:
         """Continuously executes commands until the goal is achieved or max_steps is reached."""
         last_reasoning = ""
+        context = ""
         for step in range(max_steps):
             if emit_cb:
                 emit_cb(f"Step {step+1}/{max_steps}: Analyzing current page state...")
                 
-            result = await self.execute_command(goal)
+            result = await self.execute_command(goal, context)
             
             if emit_cb:
                 if result.error:
@@ -74,7 +75,9 @@ class SemanticNavigator:
                     emit_cb(f"Taking action: {result.action}")
             
             if not result.success:
-                return result
+                context = f"Previous Action '{result.action}' failed with error: {result.error}. Try a different approach or ID."
+                await asyncio.sleep(1)
+                continue
                 
             if result.action.upper().strip() == "DONE":
                 if emit_cb:
@@ -82,6 +85,7 @@ class SemanticNavigator:
                 return result
                 
             last_reasoning = result.reasoning
+            context = f"Previous Action '{result.action}' succeeded."
             # Wait for any navigation or DOM updates
             await asyncio.sleep(2)
             
@@ -89,7 +93,7 @@ class SemanticNavigator:
             emit_cb("Max steps reached before completion.")
         return SemanticResult(reasoning=last_reasoning, action="TIMEOUT", success=False, error="Max steps reached.")
 
-    async def execute_command(self, command: str) -> SemanticResult:
+    async def execute_command(self, command: str, context: str = "") -> SemanticResult:
         """Executes a single natural language command on the current browser page."""
         page = self._browser.page
         if not page or page.is_closed():
@@ -102,7 +106,7 @@ class SemanticNavigator:
         except Exception as e:
             return SemanticResult(reasoning="", action="", success=False, error=f"DOM Extraction failed: {e}")
 
-        prompt = f"{SYSTEM_PROMPT}\n\nUser Command: {command}\n\n{dom_state}"
+        prompt = f"{SYSTEM_PROMPT}\n\nUser Command: {command}\n\nContext:\n{context}\n\n{dom_state}"
         
         # 2. Query LLM
         try:
@@ -141,20 +145,20 @@ class SemanticNavigator:
             raise RuntimeError("Page is missing")
 
         if action.upper().startswith("CLICK"):
-            parts = action.split(" ")
-            if len(parts) < 2:
-                raise ValueError("CLICK requires an ID")
-            agent_id = parts[1].strip()
-            await page.locator(f'[data-agent-id="{agent_id}"]').click(timeout=3000)
+            match = re.search(r"CLICK\s+(\d+)", action, re.IGNORECASE)
+            if not match:
+                raise ValueError("CLICK requires a numeric ID")
+            agent_id = match.group(1)
+            # Force click bypasses visibility/intercept checks which often trip up AI
+            await page.locator(f'[data-agent-id="{agent_id}"]').click(timeout=3000, force=True)
             
         elif action.upper().startswith("TYPE"):
-            # Extract ID and text
-            match = re.match(r"TYPE\s+(\d+)\s+[\"'](.*)[\"']", action, re.IGNORECASE)
+            match = re.search(r"TYPE\s+(\d+)\s+(.+)", action, re.IGNORECASE)
             if not match:
-                raise ValueError("TYPE requires an ID and text in quotes")
-            agent_id = match.group(1).strip()
-            text = match.group(2)
-            await page.locator(f'[data-agent-id="{agent_id}"]').fill(text, timeout=3000)
+                raise ValueError("TYPE requires an ID and text")
+            agent_id = match.group(1)
+            text = match.group(2).strip("\"'") # Strip quotes if LLM added them
+            await page.locator(f'[data-agent-id="{agent_id}"]').fill(text, timeout=3000, force=True)
             
         elif action.upper().strip() == "DONE":
             pass

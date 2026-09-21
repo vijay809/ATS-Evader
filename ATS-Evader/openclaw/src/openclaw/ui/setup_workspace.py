@@ -374,13 +374,11 @@ class SetupWorkspace(QWidget):
             models = ollama.get_available_models()
             if not models:
                 raise Exception("No AI models installed in local Ollama.")
-            if "gemma4:12b" in models:
-                state['model'] = "gemma4:12b"
-            else:
+            if state.get('model') not in models:
                 state['model'] = models[0]
 
         def parse_resume() -> None:
-            model = state.get('model', 'gemma4:12b')
+            model = state.get('model')
             result = analyzer_typed.parse_master_resume(text, model)
             state['result'] = result
 

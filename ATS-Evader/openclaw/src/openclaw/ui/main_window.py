@@ -34,7 +34,7 @@ from PySide6.QtWidgets import (
 from openclaw.core.events import RuntimeEvent
 from openclaw.core.runtime import Runtime
 from openclaw.core.tasks import TaskStatus
-from openclaw.ui.ai_workspace import AiWorkspace
+
 from openclaw.ui.setup_workspace import SetupWorkspace
 from openclaw.ui.process_workspace import ProcessWorkspace
 from openclaw.ui.job_pipeline_workspace import JobPipelineWorkspace
@@ -350,10 +350,7 @@ class MainWindow(QMainWindow):
         
         model_name = "None"
         if models:
-            if "gemma4:12b" in models:
-                model_name = "gemma4:12b"
-            else:
-                model_name = models[0]
+            model_name = models[0]
             ai_str = "✓"
         else:
             ai_str = "✗"

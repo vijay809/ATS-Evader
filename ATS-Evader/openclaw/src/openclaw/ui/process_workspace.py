@@ -54,7 +54,7 @@ class JobHuntWorker(QThread):
         try:
             self.agent_message.emit(f"Launching browser to search for '{self.role}' in '{self.location}'...")
             links = await self.browser.search_naukri_jobs(
-                self.role, self.location, max_results=3,
+                self.role, self.location, max_results=20,
                 win_x=self.win_x, win_y=self.win_y, win_w=self.win_w, win_h=self.win_h
             )
             

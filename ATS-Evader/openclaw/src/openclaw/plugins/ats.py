@@ -169,7 +169,7 @@ Job description:
 {job_description}
 ---"""
 
-    def tailor_resume(self, master_resume: str, job_description: str, model_id: str = "gemma4:12b") -> TailoredResume:
+    def tailor_resume(self, master_resume: str, job_description: str, model_id: str | None = None) -> TailoredResume:
         prompt = f"""You are an expert ATS optimizer and resume writer.
 I will provide a master resume and a job description.
 Tailor the resume to match the job description perfectly while remaining truthful.
@@ -198,7 +198,7 @@ Respond ONLY with valid JSON matching this schema:
             logger.error(f"Failed to parse tailored resume: {response.text}")
             raise AtsAnalysisError("Invalid tailor response from model") from e
 
-    def generate_cover_letter(self, master_resume: str, job_description: str, model_id: str = "gemma4:12b") -> CoverLetter:
+    def generate_cover_letter(self, master_resume: str, job_description: str, model_id: str | None = None) -> CoverLetter:
         prompt = f"""You are an expert career coach and copywriter.
 I will provide a master resume and a job description.
 Write a concise, compelling cover letter (or cold email) that highlights the intersection of the candidate's experience and the job's needs.
@@ -227,7 +227,7 @@ Respond ONLY with valid JSON matching this schema:
             logger.error(f"Failed to parse cover letter: {response.text}")
             raise AtsAnalysisError("Invalid cover letter response from model") from e
 
-    def parse_master_resume(self, raw_text: str, model_id: str = "gemma4:12b") -> ParsedResumeData:
+    def parse_master_resume(self, raw_text: str, model_id: str | None = None) -> ParsedResumeData:
         prompt = f"""You are an expert data extractor.
 Extract the core details and implicit preferences from this raw resume text.
 

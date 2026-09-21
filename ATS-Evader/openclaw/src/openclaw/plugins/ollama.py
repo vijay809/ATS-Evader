@@ -19,7 +19,7 @@ OLLAMA_CLIENT_SERVICE = "ollama.client"
 
 class OllamaSettings(BaseModel):
     base_url: str = "http://127.0.0.1:11434"
-    default_model: str = "gemma4:12b"
+    default_model: str | None = None
     timeout_seconds: float = Field(default=600.0, gt=0)
 
 
@@ -45,6 +45,12 @@ class OllamaClient:
         if not prompt.strip():
             raise ValueError("Prompt must not be empty")
         selected_model = model or self._settings.default_model
+        if not selected_model:
+            models = self.get_available_models()
+            if not models:
+                raise OllamaUnavailableError("No AI models installed in local Ollama.")
+            selected_model = models[0]
+            
         response = await asyncio.to_thread(
             self._sender,
             f"{self._settings.base_url.rstrip('/')}/api/generate",
