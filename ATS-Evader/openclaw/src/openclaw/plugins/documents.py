@@ -5,8 +5,8 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
-from pypdf import PdfReader
 from docx import Document
+from pypdf import PdfReader
 
 from openclaw.plugins.manager import PluginContext
 

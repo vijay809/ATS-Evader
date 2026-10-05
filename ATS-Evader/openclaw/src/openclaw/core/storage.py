@@ -10,10 +10,17 @@ from collections.abc import Iterable
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
-from sqlmodel import Field, Session, SQLModel, create_engine, select, desc
+from sqlmodel import Field, Session, SQLModel, create_engine, desc, select
 
 if TYPE_CHECKING:
-    from openclaw.core.documents import AnalysisResult, JobDescription, Resume, TailoredDraft, StructuredResume, Preference
+    from openclaw.core.documents import (
+        AnalysisResult,
+        JobDescription,
+        Preference,
+        Resume,
+        StructuredResume,
+        TailoredDraft,
+    )
     from openclaw.core.tasks import Task
 
 
@@ -198,6 +205,7 @@ class SQLiteDocumentRepository:
 
     def get_resume(self, resume_id: str) -> Resume | None:
         from uuid import UUID
+
         from openclaw.core.documents import Resume
         with Session(self._engine) as session:
             record = session.get(ResumeRecord, resume_id)
@@ -210,20 +218,22 @@ class SQLiteDocumentRepository:
 
     def get_active_structured_resume(self) -> StructuredResume | None:
         from uuid import UUID
+
         from openclaw.core.documents import StructuredResume
         with Session(self._engine) as session:
             record = session.exec(select(StructuredResumeRecord).where(StructuredResumeRecord.is_active == True)).first()
             if not record:
-                record = session.exec(select(StructuredResumeRecord).order_by(StructuredResumeRecord.created_at.desc())).first()
+                record = session.exec(select(StructuredResumeRecord).order_by(desc(StructuredResumeRecord.created_at))).first()
             if not record:
                 return None
             return StructuredResume(id=UUID(record.id), name=record.name, raw_content=record.raw_content, parsed_json=record.parsed_json, is_active=record.is_active, created_at=record.created_at)
 
     def list_structured_resumes(self) -> Iterable[StructuredResume]:
         from uuid import UUID
+
         from openclaw.core.documents import StructuredResume
         with Session(self._engine) as session:
-            records = session.exec(select(StructuredResumeRecord).order_by(StructuredResumeRecord.created_at.desc())).all()
+            records = session.exec(select(StructuredResumeRecord).order_by(desc(StructuredResumeRecord.created_at))).all()
         return tuple(StructuredResume(id=UUID(r.id), name=r.name, raw_content=r.raw_content, parsed_json=r.parsed_json, is_active=r.is_active, created_at=r.created_at) for r in records)
 
     def set_active_structured_resume(self, resume_id: str) -> None:
@@ -247,6 +257,7 @@ class SQLiteDocumentRepository:
 
     def get_preferences(self) -> Iterable[Preference]:
         from uuid import UUID
+
         from openclaw.core.documents import Preference
         with Session(self._engine) as session:
             records = session.exec(select(PreferenceRecord)).all()
@@ -254,6 +265,7 @@ class SQLiteDocumentRepository:
 
     def get_job_description(self, jd_id: str) -> JobDescription | None:
         from uuid import UUID
+
         from openclaw.core.documents import JobDescription
         with Session(self._engine) as session:
             record = session.get(JobDescriptionRecord, jd_id)
@@ -263,6 +275,7 @@ class SQLiteDocumentRepository:
 
     def list_resumes(self) -> Iterable[Resume]:
         from uuid import UUID
+
         from openclaw.core.documents import Resume
         with Session(self._engine) as session:
             records = session.exec(select(ResumeRecord)).all()
@@ -270,6 +283,7 @@ class SQLiteDocumentRepository:
 
     def list_job_descriptions(self) -> Iterable[JobDescription]:
         from uuid import UUID
+
         from openclaw.core.documents import JobDescription
         with Session(self._engine) as session:
             records = session.exec(select(JobDescriptionRecord)).all()
@@ -277,6 +291,7 @@ class SQLiteDocumentRepository:
 
     def get_latest_analysis(self, job_id: str) -> AnalysisResult | None:
         from uuid import UUID
+
         from openclaw.core.documents import AnalysisResult
         with Session(self._engine) as session:
             # Get most recent analysis for this job

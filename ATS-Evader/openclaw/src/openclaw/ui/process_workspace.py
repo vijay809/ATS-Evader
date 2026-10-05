@@ -5,20 +5,20 @@ import asyncio
 import os
 from typing import TYPE_CHECKING
 
-from PySide6.QtCore import Qt, QThread, Signal, QUrl
-from PySide6.QtGui import QShowEvent, QDesktopServices
+from PySide6.QtCore import Qt, QThread, QUrl, Signal
+from PySide6.QtGui import QDesktopServices, QShowEvent
 from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QMessageBox,
     QPushButton,
     QScrollArea,
-    QSplitter,
     QSlider,
+    QSplitter,
     QVBoxLayout,
     QWidget,
-    QMessageBox,
 )
 
 from openclaw.core.documents import JobDescription
@@ -27,6 +27,7 @@ from openclaw.plugins.browser import BROWSER_SERVICE, BrowserService
 
 if TYPE_CHECKING:
     from openclaw.core.runtime import Runtime
+    from openclaw.plugins.semantic_navigator import SemanticNavigator
 
 
 class JobHuntWorker(QThread):
@@ -49,11 +50,11 @@ class JobHuntWorker(QThread):
         self.win_w = win_w
         self.win_h = win_h
 
-    def run(self):
+    def run(self) -> None:
         asyncio.run(self.do_hunt())
         self.finished.emit()
 
-    async def do_hunt(self):
+    async def do_hunt(self) -> None:
         try:
             self.agent_message.emit(f"Launching browser to search for '{self.role}' in '{self.location}'...")
             links = await self.browser.search_naukri_jobs(
@@ -136,8 +137,9 @@ class JobHuntWorker(QThread):
                     self.agent_message.emit(msg)
                     logger.info(msg)
                     
-                    from openclaw.core.pdf_gen import PdfGenerator
                     import uuid
+
+                    from openclaw.core.pdf_gen import PdfGenerator
                     
                     job_id = str(uuid.uuid4())
                     pdf_path = os.path.join(os.getcwd(), "outputs", "resumes", f"cv_{job_id[:8]}.pdf")
@@ -183,25 +185,24 @@ class AiChatWorker(QThread):
     error = Signal(str)
     finished = Signal()
 
-    def __init__(self, navigator: object, command: str):
+    def __init__(self, navigator: SemanticNavigator, command: str) -> None:
         super().__init__()
         self.navigator = navigator
         self.command = command
 
-    def run(self):
+    def run(self) -> None:
         asyncio.run(self.do_chat())
         self.finished.emit()
 
-    async def do_chat(self):
+    async def do_chat(self) -> None:
         try:
             self.agent_message.emit(f"Processing command: '{self.command}'...")
-            
-            # Using the actual SemanticNavigator
-            def stream_callback(msg: str):
+
+            def stream_callback(msg: str) -> None:
                 self.agent_message.emit(msg)
-                
+
             result = await self.navigator.execute_goal(self.command, max_steps=10, emit_cb=stream_callback)
-            
+
             if not result.success:
                 self.agent_message.emit(f"Execution stopped. {result.error or ''}")
 
@@ -233,9 +234,10 @@ class DocumentGeneratorWorker(QThread):
 
     def run(self) -> None:
         try:
+            import asyncio
             import os
             import uuid
-            import asyncio
+
             from openclaw.core.pdf_gen import PdfGenerator
 
             if self.doc_type == "cover_letter":
@@ -462,7 +464,7 @@ class ProcessWorkspace(QWidget):
         except (AttributeError, LookupError, json.JSONDecodeError):
             return
 
-    def _reset_browser(self):
+    def _reset_browser(self) -> None:
         try:
             browser = self._runtime.services.get(BROWSER_SERVICE)
             if isinstance(browser, BrowserService):
@@ -476,14 +478,14 @@ class ProcessWorkspace(QWidget):
         os.makedirs(outputs_dir, exist_ok=True)
         QDesktopServices.openUrl(QUrl.fromLocalFile(outputs_dir))
 
-    def add_user_message(self, text: str):
+    def add_user_message(self, text: str) -> None:
         msg = QLabel(text)
         msg.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         msg.setWordWrap(True)
         msg.setStyleSheet("color: #ffffff; background-color: #3b4252; border-radius: 8px; padding: 12px; margin-left: 40px;")
         self._feed_layout.addWidget(msg)
 
-    def add_agent_message(self, text: str):
+    def add_agent_message(self, text: str) -> None:
         msg = QLabel(f"🤖 {text}")
         msg.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         msg.setWordWrap(True)
@@ -494,19 +496,22 @@ class ProcessWorkspace(QWidget):
         text = self._chat_input.text().strip()
         if not text:
             return
-            
+
         self._chat_input.clear()
         self.add_user_message(text)
-        
+
         try:
-            browser = self._runtime.services.get(BROWSER_SERVICE)
-            navigator = self._runtime.services.get("browser.navigator")
+            from openclaw.plugins.semantic_navigator import SemanticNavigator
+            nav_service = self._runtime.services.get("browser.navigator")
+            if not isinstance(nav_service, SemanticNavigator):
+                self.add_agent_message("Browser navigator is unavailable.")
+                return
         except LookupError:
             self.add_agent_message("Browser capability is unavailable.")
             return
 
         self._chat_input.setEnabled(False)
-        self._chat_worker = AiChatWorker(navigator, text)
+        self._chat_worker = AiChatWorker(nav_service, text)
         self._chat_worker.agent_message.connect(self.add_agent_message)
         self._chat_worker.error.connect(lambda e: self.add_agent_message(f"Error: {e}"))
         self._chat_worker.finished.connect(lambda: self._chat_input.setEnabled(True))
@@ -567,14 +572,14 @@ class ProcessWorkspace(QWidget):
         tailor_cv_btn.setStyleSheet("background-color: #3b5a4b; color: white; border-radius: 6px; font-weight: bold;")
         
         skip_btn = QPushButton("Skip")
-        def handle_skip():
+        def handle_skip() -> None:
             job = self._runtime.plugins._context.documents.get_job_description(job_id)
             if job:
                 job.status = "Skipped"
                 self._runtime.plugins._context.documents.save_job_description(job)
             card.deleteLater()
             
-        def handle_applied():
+        def handle_applied() -> None:
             job = self._runtime.plugins._context.documents.get_job_description(job_id)
             if job:
                 job.status = "Applied"
@@ -834,7 +839,7 @@ class BrowserLaunchWorker(QThread):
     def run(self) -> None:
         try:
             asyncio.run(self._browser.launch(self._url))
-        except Exception as error:  # noqa: BLE001
+        except Exception as error:
             self.failed.emit(str(error))
             return
         self.completed.emit()

@@ -81,8 +81,8 @@ class OllamaClient:
 
     def get_available_models(self) -> list[str]:
         """Fetch the list of installed model names from the local Ollama server."""
-        from urllib.request import urlopen, Request
         import json
+        from urllib.request import Request, urlopen
         try:
             req = Request(f"{self._settings.base_url.rstrip('/')}/api/tags", headers={"User-Agent": "OpenClaw/1.0"})
             with urlopen(req, timeout=2.0) as response:
@@ -93,8 +93,8 @@ class OllamaClient:
 
     def check_connection(self) -> bool:
         """Verify the Ollama server is running by fetching tags."""
-        from urllib.request import urlopen, Request
         import json
+        from urllib.request import Request, urlopen
         try:
             req = Request(f"{self._settings.base_url.rstrip('/')}/api/tags", headers={"User-Agent": "OpenClaw/1.0"})
             with urlopen(req, timeout=2.0) as response:

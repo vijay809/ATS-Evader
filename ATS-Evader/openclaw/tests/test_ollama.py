@@ -27,7 +27,8 @@ async def test_generate_rejects_empty_prompts() -> None:
 
 
 async def test_generate_rejects_invalid_server_responses() -> None:
-    client = OllamaClient(OllamaSettings(), lambda _url, _payload, _timeout: {})
+    client = OllamaClient(OllamaSettings(default_model="test-model"), lambda _url, _payload, _timeout: {})
 
     with pytest.raises(OllamaUnavailableError, match="without generated text"):
         await client.generate("Create a summary")
+

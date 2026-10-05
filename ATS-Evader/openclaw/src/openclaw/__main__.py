@@ -1,7 +1,9 @@
 """Desktop application entry point."""
 
 import asyncio
+import logging
 import sys
+from pathlib import Path
 
 from PySide6.QtWidgets import QApplication
 
@@ -10,10 +12,7 @@ from openclaw.core.runtime import Runtime
 from openclaw.ui.main_window import MainWindow
 
 
-import logging
-from pathlib import Path
-
-def setup_logging():
+def setup_logging() -> None:
     log_dir = Path.home() / ".openclaw" / "logs"
     log_dir.mkdir(parents=True, exist_ok=True)
     

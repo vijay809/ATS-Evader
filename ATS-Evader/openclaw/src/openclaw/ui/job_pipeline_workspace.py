@@ -2,35 +2,19 @@
 
 from __future__ import annotations
 
-import asyncio
-from typing import TYPE_CHECKING, cast
-from uuid import UUID
-
-from PySide6.QtCore import Qt, QThread, Signal
+from PySide6.QtCore import Qt, QThread
 from PySide6.QtWidgets import (
     QComboBox,
-    QFormLayout,
     QHBoxLayout,
-    QHeaderView,
     QLabel,
     QPushButton,
-    QTableWidget,
-    QTableWidgetItem,
     QScrollArea,
-    QFrame,
     QVBoxLayout,
     QWidget,
-    QMessageBox,
 )
 
-from openclaw.core.documents import JobDescription, Resume, AnalysisResult
+from openclaw.core.documents import JobDescription
 from openclaw.core.runtime import Runtime
-from openclaw.core.tasks import TaskStatus
-from openclaw.plugins.ats import ATS_ANALYZER_SERVICE, AtsAnalyzer, AtsAnalysis, TailoredResume
-
-
-if TYPE_CHECKING:
-    pass
 
 
 class JobPipelineWorkspace(QWidget):
@@ -108,8 +92,10 @@ class JobPipelineWorkspace(QWidget):
         for layout in self.columns.values():
             while layout.count():
                 child = layout.takeAt(0)
-                if child.widget():
-                    child.widget().deleteLater()
+                if child is not None:
+                    w = child.widget()
+                    if w is not None:
+                        w.deleteLater()
                     
         try:
             jobs = self._runtime.plugins._context.documents.list_job_descriptions()

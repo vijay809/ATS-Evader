@@ -5,17 +5,15 @@ from __future__ import annotations
 import asyncio
 import logging
 import threading
-import concurrent.futures
-from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 from playwright.async_api import Browser, BrowserContext, Page, Playwright, async_playwright
 from playwright_stealth import Stealth  # type: ignore[import-untyped]
 
-from openclaw.core.events import RuntimeEvent
 from openclaw.plugins.manager import PluginContext
-from openclaw.plugins.semantic_navigator import SemanticNavigator
 from openclaw.plugins.ollama import OllamaClient
+from openclaw.plugins.semantic_navigator import SemanticNavigator
 
 logger = logging.getLogger(__name__)
 
@@ -38,7 +36,7 @@ class BrowserService:
         asyncio.set_event_loop(self._loop)
         self._loop.run_forever()
 
-    def _on_disconnected(self, browser: Browser) -> None:
+    def _on_disconnected(self, browser: Any = None) -> None:
         self._page = None
         self._browser_context = None
         self._browser = None
@@ -72,7 +70,7 @@ class BrowserService:
         )
         self._browser_context.on("close", lambda ctx: self._on_disconnected(None))
         
-        def handle_new_page(new_page: Page):
+        def handle_new_page(new_page: Page) -> None:
             self._page = new_page
             
         self._browser_context.on("page", handle_new_page)
@@ -156,6 +154,9 @@ class BrowserService:
         loc_slug = location.replace(" ", "-").lower()
         url = f"https://www.naukri.com/{role_slug}-jobs-in-{loc_slug}"
         
+        if self._page is None:
+            raise RuntimeError("Browser page failed to initialize")
+
         await self._page.goto(url, wait_until="domcontentloaded")
         await asyncio.sleep(3) # Wait for page to render
         

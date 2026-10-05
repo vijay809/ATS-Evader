@@ -1,7 +1,9 @@
+import os
+
+from sqlmodel import create_engine
+
 from openclaw.core.config import RuntimeSettings
 from openclaw.core.storage import SQLModel
-from sqlmodel import create_engine
-import os
 
 db = RuntimeSettings().database_path
 if db.exists():

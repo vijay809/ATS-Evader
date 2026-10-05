@@ -3,14 +3,14 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 import re
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from openclaw.plugins.ollama import OllamaClient
 from openclaw.plugins.dom_extractor import DOMExtractor
+from openclaw.plugins.ollama import OllamaClient
 
 if TYPE_CHECKING:
     from openclaw.plugins.browser import BrowserService
@@ -63,7 +63,13 @@ class SemanticNavigator:
         self._browser = browser_service
         self._current_cv_path: str | None = None
 
-    async def execute_goal(self, goal: str, max_steps: int = 10, emit_cb=None, cv_path: str | None = None) -> SemanticResult:
+    async def execute_goal(
+        self,
+        goal: str,
+        max_steps: int = 10,
+        emit_cb: Callable[[str], None] | None = None,
+        cv_path: str | None = None,
+    ) -> SemanticResult:
         """Continuously executes commands until the goal is achieved or max_steps is reached."""
         self._current_cv_path = cv_path
         last_reasoning = ""

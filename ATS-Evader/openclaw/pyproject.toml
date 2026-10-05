@@ -45,6 +45,14 @@ asyncio_mode = "auto"
 line-length = 100
 target-version = "py312"
 
+[tool.ruff.lint]
+ignore = [
+    "BLE001",  # Do not catch blind exception (GUI threads and daemon loops intentionally isolate exceptions)
+    "S110",    # try-except-pass for service probing
+    "TRY002",  # vanilla Exception
+    "TRY004",  # type-check-without-type-error
+]
+
 [tool.mypy]
 python_version = "3.12"
 strict = true

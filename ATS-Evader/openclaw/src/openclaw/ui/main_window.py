@@ -2,89 +2,123 @@
 
 from __future__ import annotations
 
-import asyncio
-from datetime import UTC
-from uuid import UUID
+import logging
+import subprocess
+import time
 
-from PySide6.QtCore import Qt, QSize, QTimer, Signal, QThread
-from PySide6.QtGui import QIcon, QAction
+from PySide6.QtCore import QObject, Qt, QThread, Signal
+from PySide6.QtGui import QCloseEvent, QShowEvent
 from PySide6.QtWidgets import (
-    QAbstractItemView,
-    QApplication,
-    QComboBox,
-    QDockWidget,
     QFrame,
     QHBoxLayout,
-    QHeaderView,
     QLabel,
-    QLineEdit,
     QMainWindow,
-    QMessageBox,
-    QPlainTextEdit,
     QProgressBar,
     QPushButton,
     QStackedWidget,
-    QTableWidget,
-    QTableWidgetItem,
-    QToolBar,
     QVBoxLayout,
     QWidget,
 )
 
 from openclaw.core.events import RuntimeEvent
 from openclaw.core.runtime import Runtime
-from openclaw.core.tasks import TaskStatus
-
-from openclaw.ui.setup_workspace import SetupWorkspace
-from openclaw.ui.process_workspace import ProcessWorkspace
 from openclaw.ui.job_pipeline_workspace import JobPipelineWorkspace
-from openclaw.ui.monitor import task_rows
+from openclaw.ui.process_workspace import ProcessWorkspace
+from openclaw.ui.setup_workspace import SetupWorkspace
+
+logger = logging.getLogger(__name__)
+
+
+class MetricWidget(QWidget):
+    def __init__(self, label_text: str, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.label_prefix = label_text
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(8)
+
+        self.lbl = QLabel(f"{label_text} 0%")
+        self.lbl.setStyleSheet("color: #8b90a0; font-family: monospace; font-size: 11px;")
+
+        self.pb = QProgressBar()
+        self.pb.setRange(0, 100)
+        self.pb.setValue(0)
+        self.pb.setTextVisible(False)
+        self.pb.setFixedHeight(6)
+        self.pb.setStyleSheet("""
+            QProgressBar {
+                background-color: #2a2a2a; border-radius: 4px; border: none;
+            }
+            QProgressBar::chunk {
+                background-color: #adc6ff; border-radius: 4px;
+            }
+        """)
+
+        layout.addWidget(self.lbl)
+        layout.addWidget(self.pb, stretch=1)
+
 
 class SystemMonitorThread(QThread):
     metrics_updated = Signal(float, float, float, float)  # cpu, ram, gpu_load, vram_usage
-    
+
     def run(self) -> None:
-        import time
-        import psutil
-        import subprocess
+        import psutil  # type: ignore[import-untyped]
 
         # Find nvidia-smi bypassing PATH issues
         nvidia_smi_path = None
         for path in [
             "nvidia-smi",
             r"C:\Windows\System32\nvidia-smi.exe",
-            r"C:\Program Files\NVIDIA Corporation\NVSMI\nvidia-smi.exe"
+            r"C:\Program Files\NVIDIA Corporation\NVSMI\nvidia-smi.exe",
         ]:
             try:
-                subprocess.run([path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                subprocess.run(
+                    [path],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    check=False,
+                )
                 nvidia_smi_path = path
                 break
-            except FileNotFoundError:
+            except (FileNotFoundError, OSError):
                 continue
 
         while not self.isInterruptionRequested():
-            cpu = psutil.cpu_percent()
-            ram = psutil.virtual_memory().percent
+            cpu = float(psutil.cpu_percent())
+            ram = float(psutil.virtual_memory().percent)
             gpu_load = 0.0
             vram_usage = 0.0
-            
+
             if nvidia_smi_path:
                 try:
-                    creationflags = subprocess.CREATE_NO_WINDOW if hasattr(subprocess, "CREATE_NO_WINDOW") else 0
+                    creationflags = (
+                        subprocess.CREATE_NO_WINDOW
+                        if hasattr(subprocess, "CREATE_NO_WINDOW")
+                        else 0
+                    )
                     result = subprocess.run(
-                        [nvidia_smi_path, "--query-gpu=utilization.gpu,memory.used,memory.total", "--format=csv,noheader,nounits"],
-                        capture_output=True, text=True, creationflags=creationflags
+                        [
+                            nvidia_smi_path,
+                            "--query-gpu=utilization.gpu,memory.used,memory.total",
+                            "--format=csv,noheader,nounits",
+                        ],
+                        capture_output=True,
+                        text=True,
+                        creationflags=creationflags,
+                        check=False,
                     )
                     if result.returncode == 0 and result.stdout.strip():
-                        parts = result.stdout.strip().split(',')
+                        parts = result.stdout.strip().split(",")
                         if len(parts) >= 3:
                             gpu_load = float(parts[0].strip())
                             used_mem = float(parts[1].strip())
                             total_mem = float(parts[2].strip())
-                            vram_usage = (used_mem / total_mem) * 100 if total_mem > 0 else 0.0
-                except Exception:
-                    pass
-            
+                            vram_usage = (
+                                (used_mem / total_mem) * 100 if total_mem > 0 else 0.0
+                            )
+                except (ValueError, OSError) as e:
+                    logger.debug("nvidia-smi query failed: %s", e)
+
             self.metrics_updated.emit(cpu, ram, gpu_load, vram_usage)
             time.sleep(1.5)
 
@@ -192,46 +226,17 @@ class MainWindow(QMainWindow):
         # Bottom Bar for System Metrics
         bottom_bar = QFrame()
         bottom_bar.setFixedHeight(40)
-        bottom_bar.setStyleSheet("background-color: rgba(19, 19, 19, 0.9); border-top: 1px solid rgba(255,255,255,0.05);")
+        bottom_bar.setStyleSheet(
+            "background-color: rgba(19, 19, 19, 0.9); border-top: 1px solid rgba(255,255,255,0.05);"
+        )
         bottom_layout = QHBoxLayout(bottom_bar)
         bottom_layout.setContentsMargins(24, 0, 24, 0)
         bottom_layout.setSpacing(24)
 
-        def create_metric_widget(label_text: str) -> QWidget:
-            container = QWidget()
-            layout = QHBoxLayout(container)
-            layout.setContentsMargins(0, 0, 0, 0)
-            layout.setSpacing(12)
-            
-            lbl = QLabel(f"{label_text} 0%")
-            lbl.setFixedWidth(65)
-            lbl.setStyleSheet("color: #8b90a0; font-size: 11px; font-weight: bold; border: none;")
-            
-            pb = QProgressBar()
-            pb.setTextVisible(False)
-            pb.setFixedHeight(12)
-            pb.setStyleSheet("""
-                QProgressBar {
-                    background-color: #2a2a2a; border-radius: 4px;
-                }
-                QProgressBar::chunk {
-                    background-color: #adc6ff; border-radius: 4px;
-                }
-            """)
-            
-            layout.addWidget(lbl)
-            layout.addWidget(pb, stretch=1)
-            
-            # Store references to update later
-            container.pb = pb
-            container.lbl = lbl
-            container.label_prefix = label_text
-            return container
-
-        self._cpu_widget = create_metric_widget("CPU")
-        self._ram_widget = create_metric_widget("RAM")
-        self._gpu_widget = create_metric_widget("GPU")
-        self._vram_widget = create_metric_widget("VRAM")
+        self._cpu_widget = MetricWidget("CPU")
+        self._ram_widget = MetricWidget("RAM")
+        self._gpu_widget = MetricWidget("GPU")
+        self._vram_widget = MetricWidget("VRAM")
 
         bottom_layout.addWidget(self._cpu_widget, stretch=1)
         bottom_layout.addWidget(self._ram_widget, stretch=1)
@@ -243,18 +248,23 @@ class MainWindow(QMainWindow):
         central_layout.addWidget(nav_rail)
         central_layout.addWidget(right_area)
 
+        # Tab Navigation Connections
+        self._btn_setup.clicked.connect(lambda: self._stacked.setCurrentIndex(0))
+        self._btn_process.clicked.connect(lambda: self._stacked.setCurrentIndex(1))
+        self._btn_history.clicked.connect(lambda: self._stacked.setCurrentIndex(2))
+
         # Start Monitor Thread
         self._monitor_thread = SystemMonitorThread(self)
         self._monitor_thread.metrics_updated.connect(self._update_metrics)
         self._monitor_thread.start()
 
     def _update_metrics(self, cpu: float, ram: float, gpu: float, vram: float) -> None:
-        def update_single_metric(widget: Any, new_val: float) -> None:
+        def update_single_metric(widget: MetricWidget, new_val: float) -> None:
             old_val = widget.pb.value()
             int_val = int(new_val)
             widget.pb.setValue(int_val)
             widget.lbl.setText(f"{widget.label_prefix} {int_val}%")
-            
+
             # Highlight jump > 5% (increasing or decreasing)
             if abs(int_val - old_val) > 5:
                 widget.pb.setFixedHeight(14)
@@ -266,19 +276,21 @@ class MainWindow(QMainWindow):
                         background-color: #ffb595; border-radius: 8px;
                     }
                 """)
-                
+
                 # Restore original style
                 def restore() -> None:
-                    widget.pb.setFixedHeight(12)
+                    widget.pb.setFixedHeight(6)
                     widget.pb.setStyleSheet("""
                         QProgressBar {
-                            background-color: #2a2a2a; border-radius: 4px;
+                            background-color: #2a2a2a; border-radius: 4px; border: none;
                         }
                         QProgressBar::chunk {
                             background-color: #adc6ff; border-radius: 4px;
                         }
                     """)
+
                 from PySide6.QtCore import QTimer
+
                 QTimer.singleShot(2000, restore)
 
         update_single_metric(self._cpu_widget, cpu)
@@ -286,12 +298,7 @@ class MainWindow(QMainWindow):
         update_single_metric(self._gpu_widget, gpu)
         update_single_metric(self._vram_widget, vram)
 
-        # Connections
-        self._btn_setup.clicked.connect(lambda: self._stacked.setCurrentIndex(0))
-        self._btn_process.clicked.connect(lambda: self._stacked.setCurrentIndex(1))
-        self._btn_history.clicked.connect(lambda: self._stacked.setCurrentIndex(2))
-
-    def closeEvent(self, event: Any) -> None:
+    def closeEvent(self, event: QCloseEvent) -> None:
         self._monitor_thread.requestInterruption()
         self._monitor_thread.wait()
         super().closeEvent(event)
@@ -299,7 +306,7 @@ class MainWindow(QMainWindow):
     async def _on_task_changed(self, event: RuntimeEvent) -> None:
         self.event_received.emit(event)
 
-    def showEvent(self, event: Any) -> None:
+    def showEvent(self, event: QShowEvent) -> None:
         super().showEvent(event)
         # Run health check on startup without blocking UI using QThread
         self._run_system_health_check()
@@ -316,28 +323,29 @@ class MainWindow(QMainWindow):
             return
 
         import typing
+
         ollama = typing.cast(OllamaClient, client)
 
-        from PySide6.QtCore import QThread, Signal
-
         class HealthCheckThread(QThread):
-            finished_check = Signal(bool, bool, list)
-            
-            def __init__(self, ollama_client: OllamaClient, parent: Any = None):
+            finished_check = Signal(bool, bool, object)
+
+            def __init__(
+                self, ollama_client: OllamaClient, parent: QObject | None = None
+            ) -> None:
                 super().__init__(parent)
                 self.ollama = ollama_client
-                
+
             def run(self) -> None:
                 has_ollama = self.ollama.check_ollama_availability()
                 server_up = False
-                models = []
+                models: list[str] = []
                 if has_ollama:
                     try:
                         server_up = self.ollama.check_connection()
                         if server_up:
                             models = self.ollama.get_available_models()
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.debug("health check probe failed: %s", e)
                 self.finished_check.emit(has_ollama, server_up, models)
 
         self._health_thread = HealthCheckThread(ollama, self)

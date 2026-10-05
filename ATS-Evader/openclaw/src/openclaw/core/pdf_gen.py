@@ -7,11 +7,10 @@ pixel-perfect PDFs with strict page-break controls and typography hierarchy.
 from __future__ import annotations
 
 import os
-from datetime import datetime
-from pathlib import Path
-import markdown
-from playwright.async_api import async_playwright
+from datetime import UTC, datetime
 
+import markdown  # type: ignore[import-untyped]
+from playwright.async_api import async_playwright
 
 RESUME_CSS = """
 @page {
@@ -286,7 +285,7 @@ class PdfGenerator:
             extensions=["tables", "fenced_code", "nl2br"],
         )
 
-        now_str = datetime.now().strftime("%B %d, %Y")
+        now_str = datetime.now(UTC).strftime("%B %d, %Y")
         name_str = candidate_name or "Applicant"
         contact_str = contact_info or ""
         recipient_str = recipient_info or "Hiring Team"

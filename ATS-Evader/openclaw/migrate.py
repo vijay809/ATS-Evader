@@ -1,5 +1,6 @@
-from openclaw.core.config import RuntimeSettings
 import sqlite3
+
+from openclaw.core.config import RuntimeSettings
 
 db = str(RuntimeSettings().database_path)
 print(f"Migrating {db}")

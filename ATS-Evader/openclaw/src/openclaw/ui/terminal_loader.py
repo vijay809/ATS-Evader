@@ -1,11 +1,19 @@
 """Reusable Terminal Loader Overlay."""
 from __future__ import annotations
 
-from typing import Callable, Any
-from PySide6.QtCore import Qt, QThread, Signal, QTimer
+from collections.abc import Callable
+from typing import Any
+
+from PySide6.QtCore import Qt, QThread, QTimer, Signal
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
-    QProgressBar, QFrame, QScrollArea, QPushButton
+    QFrame,
+    QHBoxLayout,
+    QLabel,
+    QProgressBar,
+    QPushButton,
+    QScrollArea,
+    QVBoxLayout,
+    QWidget,
 )
 
 
@@ -151,8 +159,9 @@ class TerminalLoaderOverlay(QFrame):
 
     def start_sequence(self, steps: list[tuple[str, Callable[[], Any]]]) -> None:
         """Starts the terminal loader with a given sequence of steps."""
-        if self.parent():
-            self.setGeometry(0, 0, self.parent().width(), self.parent().height())
+        parent_w = self.parentWidget()
+        if parent_w is not None:
+            self.setGeometry(0, 0, parent_w.width(), parent_w.height())
         self.show()
         self.raise_()
         self._close_btn.hide()
@@ -160,8 +169,10 @@ class TerminalLoaderOverlay(QFrame):
         # Clear logs
         while self._log_layout.count():
             child = self._log_layout.takeAt(0)
-            if child.widget():
-                child.widget().deleteLater()
+            if child is not None:
+                w = child.widget()
+                if w is not None:
+                    w.deleteLater()
                 
         self._total_steps = len(steps)
         self._current_step = 0
@@ -200,6 +211,7 @@ class TerminalLoaderOverlay(QFrame):
                 QGuiApplication.clipboard().setText(self.copy_text)
                 super().mousePressEvent(event)
 
+        status_lbl: QLabel
         if is_error:
             status_lbl = CopyLabel(f"[{status}]", text)
             status_lbl.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -271,5 +283,6 @@ class TerminalLoaderOverlay(QFrame):
     def resizeEvent(self, event: Any) -> None:
         super().resizeEvent(event)
         # Resize to cover parent
-        if self.parent():
-            self.resize(self.parent().size())
+        parent_w = self.parentWidget()
+        if parent_w is not None:
+            self.resize(parent_w.size())

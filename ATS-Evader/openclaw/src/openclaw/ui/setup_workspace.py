@@ -1,20 +1,27 @@
 """Setup workspace matching the Stitch AI design."""
 from __future__ import annotations
 
-import json
 from collections.abc import Callable
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
-from PySide6.QtCore import Qt, QThread, Signal, QSize
-from PySide6.QtGui import QIcon
+
+from PySide6.QtCore import Qt, Signal
+from PySide6.QtGui import QShowEvent
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
-    QPlainTextEdit, QPushButton, QMessageBox, QScrollArea, QFrame, QSizePolicy,
-    QFileDialog
+    QFileDialog,
+    QFrame,
+    QHBoxLayout,
+    QLabel,
+    QMessageBox,
+    QPlainTextEdit,
+    QPushButton,
+    QScrollArea,
+    QVBoxLayout,
+    QWidget,
 )
 
-from openclaw.core.documents import StructuredResume, Preference
+from openclaw.core.documents import Preference, StructuredResume
 from openclaw.plugins.ats import ATS_ANALYZER_SERVICE, AtsAnalyzer, ParsedResumeData
 
 if TYPE_CHECKING:
@@ -22,6 +29,7 @@ if TYPE_CHECKING:
 
 
 from openclaw.ui.terminal_loader import TerminalLoaderOverlay
+
 
 class HistoryProfileWidget(QFrame):
     """Expandable accordion for historical profiles."""
@@ -66,7 +74,7 @@ class HistoryProfileWidget(QFrame):
         except Exception:
             pass
             
-        time_str = datetime.fromtimestamp(resume.created_at).strftime("%b %d, %H:%M")
+        time_str = datetime.fromtimestamp(resume.created_at, tz=UTC).strftime("%b %d, %H:%M")
         sub_lbl = QLabel(f"{time_str} • {role}")
         sub_lbl.setStyleSheet("color: #8b90a0; font-family: monospace; font-size: 11px; border: none;")
         
@@ -251,7 +259,7 @@ class ResumeDropZone(QFrame):
 class SetupWorkspace(QWidget):
     """The Setup screen for parsing a master resume."""
 
-    def __init__(self, runtime: 'Runtime') -> None:
+    def __init__(self, runtime: Runtime) -> None:
         super().__init__()
         self._runtime = runtime
         
@@ -324,7 +332,7 @@ class SetupWorkspace(QWidget):
         scroll.setWidget(container)
         main_layout.addWidget(scroll)
 
-    def showEvent(self, event):
+    def showEvent(self, event: QShowEvent) -> None:
         super().showEvent(event)
         self._refresh_profiles()
 
@@ -332,8 +340,10 @@ class SetupWorkspace(QWidget):
         # Clear layout
         while self._profiles_layout.count():
             item = self._profiles_layout.takeAt(0)
-            if item.widget():
-                item.widget().deleteLater()
+            if item is not None:
+                w = item.widget()
+                if w is not None:
+                    w.deleteLater()
                 
         try:
             repo = self._runtime.plugins._context.documents
@@ -442,13 +452,17 @@ class SetupWorkspace(QWidget):
 
     def _on_file_loaded(self, file_path: str) -> None:
         try:
+            import typing
+
+            from openclaw.plugins.documents import DocumentIngestionService
+
             try:
                 ingest_service = self._runtime.services.get("documents.ingestion")
             except LookupError:
-                from openclaw.plugins.documents import DocumentIngestionService
                 ingest_service = DocumentIngestionService()
 
-            text = ingest_service.read_text(file_path)
+            ingestion_typed = typing.cast(DocumentIngestionService, ingest_service)
+            text = ingestion_typed.read_text(file_path)
             self._text_area.setPlainText(text)
             file_name = Path(file_path).name
             self._drop_zone.status_lbl.setText(f"✓ Loaded: {file_name}")
@@ -467,7 +481,7 @@ class SetupWorkspace(QWidget):
             return
 
         import typing
-        from openclaw.plugins.ats import AtsAnalyzer
+
         from openclaw.plugins.ollama import OLLAMA_CLIENT_SERVICE, OllamaClient
         
         analyzer_typed = typing.cast(AtsAnalyzer, analyzer)
@@ -477,11 +491,11 @@ class SetupWorkspace(QWidget):
             QMessageBox.warning(self, "Error", "Ollama service not available.")
             return
 
-        state = {}
+        state: dict[str, Any] = {}
 
         def check_ollama_availability() -> None:
             if not ollama.check_ollama_availability():
-                raise Exception("Ollama executable not found in system PATH. Please install Ollama.")
+                raise RuntimeError("Ollama executable not found in system PATH. Please install Ollama.")
 
         def check_and_boot_server() -> None:
             server_up = False
@@ -500,27 +514,28 @@ class SetupWorkspace(QWidget):
                             return
                     except Exception:
                         pass
-                raise Exception("Started Ollama but it did not become ready within 10 seconds.")
+                raise RuntimeError("Started Ollama but it did not become ready within 10 seconds.")
 
         def verify_ai_model() -> None:
             models = ollama.get_available_models()
             if not models:
-                raise Exception("No AI models installed in local Ollama.")
-            if state.get('model') not in models:
-                state['model'] = models[0]
+                raise RuntimeError("No AI models installed in local Ollama.")
+            curr_model = state.get("model")
+            if not isinstance(curr_model, str) or curr_model not in models:
+                state["model"] = models[0]
 
         def parse_resume() -> None:
-            model = state.get('model')
-            result = analyzer_typed.parse_master_resume(text, model)
-            state['result'] = result
+            model = state.get("model")
+            model_str = model if isinstance(model, str) else None
+            result = analyzer_typed.parse_master_resume(text, model_str)
+            state["result"] = result
 
         def save_data() -> None:
-            result = state.get('result')
-            if not result or not hasattr(result, "preferences"):
-                raise Exception("Invalid parsed data.")
+            result = state.get("result")
+            if not isinstance(result, ParsedResumeData):
+                raise RuntimeError("Invalid parsed data.")
             
-            parsed = typing.cast(ParsedResumeData, result)
-            candidate_name = parsed.preferences.get("Candidate Name", "Master Resume")
+            candidate_name = result.preferences.get("Candidate Name", "Master Resume")
             
             repo = self._runtime.plugins._context.documents
             # Store the entire ParsedResumeData payload so preferences move with the resume
@@ -528,7 +543,7 @@ class SetupWorkspace(QWidget):
             repo.save_structured_resume(sr)
             
             # Save global preferences as fallback
-            for k, v in parsed.preferences.items():
+            for k, v in result.preferences.items():
                 pref = Preference(key=k, value=v)
                 repo.save_preference(pref)
                 
@@ -539,7 +554,7 @@ class SetupWorkspace(QWidget):
             self._text_area.clear()
             self._refresh_profiles()
 
-        steps = [
+        steps: list[tuple[str, Callable[[], None]]] = [
             ("CHECKING OLLAMA AVAILABILITY...", check_ollama_availability),
             ("CONNECTING TO OLLAMA SERVER...", check_and_boot_server),
             ("VERIFYING AI MODEL...", verify_ai_model),
@@ -548,13 +563,14 @@ class SetupWorkspace(QWidget):
         ]
         
         # Connect the all_completed signal to our refresh function
-        original_start = self._loader.start_sequence
-        def wrapped_start(steps_list):
-            original_start(steps_list)
-            try:
-                self._loader._task.all_completed.disconnect(finish_and_refresh)
-            except Exception:
-                pass
-            self._loader._task.all_completed.connect(finish_and_refresh)
+        def wrapped_start(steps_list: list[tuple[str, Callable[[], None]]]) -> None:
+            self._loader.start_sequence(steps_list)
+            task = self._loader._task
+            if task is not None:
+                try:
+                    task.all_completed.disconnect(finish_and_refresh)
+                except (RuntimeError, TypeError):
+                    pass
+                task.all_completed.connect(finish_and_refresh)
             
         wrapped_start(steps)
