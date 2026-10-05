@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (
     QPushButton,
     QScrollArea,
     QSplitter,
+    QSlider,
     QVBoxLayout,
     QWidget,
     QMessageBox,
@@ -33,7 +34,7 @@ class JobHuntWorker(QThread):
     error = Signal(str)
     finished = Signal()
 
-    def __init__(self, browser_service: BrowserService, ats_analyzer: AtsAnalyzer, navigator: object, active_resume: str, role: str, location: str, min_exp: int, win_x: int = 0, win_y: int = 0, win_w: int = 1280, win_h: int = 800):
+    def __init__(self, browser_service: BrowserService, ats_analyzer: AtsAnalyzer, navigator: object, active_resume: str, role: str, location: str, min_exp: int, win_x: int = 0, win_y: int = 0, win_w: int = 1280, win_h: int = 800, threshold: int = 50):
         super().__init__()
         self.browser = browser_service
         self.analyzer = ats_analyzer
@@ -42,6 +43,7 @@ class JobHuntWorker(QThread):
         self.role = role
         self.location = location
         self.min_exp = min_exp
+        self.threshold = threshold
         self.win_x = win_x
         self.win_y = win_y
         self.win_w = win_w
@@ -66,6 +68,10 @@ class JobHuntWorker(QThread):
             self.agent_message.emit(f"Found {len(links)} matching job links. Extracting details...")
             
             for i, link in enumerate(links):
+                if self.isInterruptionRequested():
+                    self.agent_message.emit("Job Hunt was stopped by the user.")
+                    break
+                    
                 if not self.browser.page or self.browser.page.is_closed():
                     raise RuntimeError("Browser was closed by the user.")
                     
@@ -112,9 +118,11 @@ class JobHuntWorker(QThread):
                 analysis = analysis_task.result()
                 
                 status = "Analyzed"
-                if analysis.match_score >= 80:
-                    self.agent_message.emit(f"Score {analysis.match_score}% meets threshold! Tailoring CV...")
-                    tailor_task = asyncio.create_task(self.analyzer.tailor_resume(self.active_resume, jd['description']))
+                if analysis.match_score >= self.threshold:
+                    msg = f"Score {analysis.match_score}% meets threshold! Tailoring CV..."
+                    self.agent_message.emit(msg)
+                    logger.info(msg)
+                    tailor_task = asyncio.create_task(self.analyzer.tailor(self.active_resume, jd['description']))
                     while not tailor_task.done():
                         if not self.browser.page or self.browser.page.is_closed():
                             tailor_task.cancel()
@@ -122,7 +130,10 @@ class JobHuntWorker(QThread):
                         await asyncio.sleep(1)
                         
                     tailored = tailor_task.result()
-                    self.agent_message.emit("CV Tailored! Generating PDF...")
+                    
+                    msg = "CV Tailored! Generating PDF..."
+                    self.agent_message.emit(msg)
+                    logger.info(msg)
                     
                     import os
                     from openclaw.core.pdf_gen import PdfGenerator
@@ -132,23 +143,38 @@ class JobHuntWorker(QThread):
                     pdf_path = os.path.join(os.getcwd(), "outputs", "resumes", f"cv_{job_id[:8]}.pdf")
                     pdf_path = await PdfGenerator.markdown_to_pdf(tailored.tailored_resume, pdf_path)
                     
-                    self.agent_message.emit(f"PDF Generated at: {pdf_path}")
-                    self.agent_message.emit("Triggering Autonomous Apply...")
+                    msg1 = f"PDF Generated at: {pdf_path}"
+                    msg2 = "Triggering Autonomous Apply..."
+                    self.agent_message.emit(msg1)
+                    logger.info(msg1)
+                    self.agent_message.emit(msg2)
+                    logger.info(msg2)
                     
                     def stream_callback(msg: str):
                         self.agent_message.emit(msg)
+                        logger.info(f"Agent: {msg}")
+                        
+                    if self.isInterruptionRequested():
+                        self.agent_message.emit("Job Hunt was stopped by the user.")
+                        break
                         
                     cmd = "Apply to this job. The tailored resume is ready. If asked to upload, just upload it and consider it uploaded. Then submit."
                     nav_result = await self.navigator.execute_goal(cmd, max_steps=15, emit_cb=stream_callback, cv_path=pdf_path)
                     
                     if nav_result.success:
-                        self.agent_message.emit(f"Successfully applied to {jd['title']}!")
+                        msg = f"Successfully applied to {jd['title']}!"
+                        self.agent_message.emit(msg)
+                        logger.info(msg)
                         status = "Applied"
                     else:
-                        self.agent_message.emit(f"Failed to apply to {jd['title']}. Error: {nav_result.error}")
+                        msg = f"Failed to apply to {jd['title']}. Error: {nav_result.error}"
+                        self.agent_message.emit(msg)
+                        logger.error(msg)
                         status = "Skipped"
                 else:
-                    self.agent_message.emit(f"Skipping '{jd['title']}' - Score {analysis.match_score}% is below 80%.")
+                    msg = f"Skipping '{jd['title']}' - Score {analysis.match_score}% is below {self.threshold}% threshold."
+                    self.agent_message.emit(msg)
+                    logger.info(msg)
                     status = "Skipped"
                 
                 job = ImportedJob(
@@ -264,20 +290,35 @@ class ProcessWorkspace(QWidget):
         # Dynamic Preferences area (we will populate this from DB)
         self._pref_layout = QVBoxLayout()
         sidebar_layout.addLayout(self._pref_layout)
+        
+        self._threshold_lbl = QLabel("ATS Threshold: 50%")
+        self._threshold_lbl.setStyleSheet("color: white; font-weight: bold; border: none;")
+        self._threshold_slider = QSlider(Qt.Orientation.Horizontal)
+        self._threshold_slider.setRange(5, 95)
+        self._threshold_slider.setSingleStep(5)
+        self._threshold_slider.setPageStep(5)
+        self._threshold_slider.setTickInterval(5)
+        self._threshold_slider.setTickPosition(QSlider.TickPosition.TicksBelow)
+        self._threshold_slider.setValue(50)
+        self._threshold_slider.valueChanged.connect(
+            lambda v: self._threshold_lbl.setText(f"ATS Threshold: {v}%")
+        )
+        sidebar_layout.addWidget(self._threshold_lbl)
+        sidebar_layout.addWidget(self._threshold_slider)
 
         sidebar_layout.addStretch()
 
-        self._start_btn = QPushButton("Start Job Hunt")
-        self._start_btn.setMinimumHeight(48)
-        self._start_btn.setStyleSheet("""
+        self._toggle_btn = QPushButton("Start Job Hunt")
+        self._toggle_btn.setMinimumHeight(48)
+        self._toggle_btn.setStyleSheet("""
             QPushButton {
                 background-color: #adc6ff; color: #002e69; 
                 border-radius: 8px; font-size: 16px; font-weight: bold;
             }
             QPushButton:disabled { background-color: #555; color: #aaa; }
         """)
-        self._start_btn.clicked.connect(self.start_job_hunt)
-        sidebar_layout.addWidget(self._start_btn)
+        self._toggle_btn.clicked.connect(self.toggle_job_hunt)
+        sidebar_layout.addWidget(self._toggle_btn)
         
         self._reset_btn = QPushButton("Reset Browser")
         self._reset_btn.setMinimumHeight(40)
@@ -567,13 +608,19 @@ class ProcessWorkspace(QWidget):
             
             self.window().setGeometry(avail_geo.x(), y_pos, w, h)
 
-            self._start_btn.setEnabled(False)
-            self._start_btn.setText("Auto-Hunting...")
+            self._toggle_btn.setText("Stop Hunt")
+            self._toggle_btn.setStyleSheet("""
+                QPushButton {
+                    background-color: #690000; color: #ffadc6; 
+                    border-radius: 8px; font-size: 16px; font-weight: bold;
+                }
+            """)
             self.add_agent_message(f"Beginning automated job hunt for '{role}' in '{location}'...")
             
+            threshold = self._threshold_slider.value()
             self._worker = JobHuntWorker(
                 browser, analyzer, navigator, active_resume.raw_content, role, location, min_exp,
-                win_x=avail_geo.x() + w, win_y=y_pos, win_w=w, win_h=h
+                win_x=avail_geo.x() + w, win_y=y_pos, win_w=w, win_h=h, threshold=threshold
             )
             self._worker.agent_message.connect(self.add_agent_message)
             self._worker.job_found.connect(self._on_job_imported)
@@ -584,9 +631,28 @@ class ProcessWorkspace(QWidget):
         except Exception as e:
             self._on_worker_failed(str(e))
 
+    def toggle_job_hunt(self) -> None:
+        if self._worker and self._worker.isRunning():
+            self.stop_job_hunt()
+        else:
+            self.start_job_hunt()
+
+    def stop_job_hunt(self) -> None:
+        if self._worker and self._worker.isRunning():
+            self.add_agent_message("Stopping Job Hunt... (Waiting for current step to finish)")
+            self._worker.requestInterruption()
+            self._toggle_btn.setEnabled(False)
+            self._toggle_btn.setText("Stopping...")
+
     def _on_hunt_finished(self) -> None:
-        self._start_btn.setEnabled(True)
-        self._start_btn.setText("Start Job Hunt")
+        self._toggle_btn.setEnabled(True)
+        self._toggle_btn.setText("Start Job Hunt")
+        self._toggle_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #adc6ff; color: #002e69; 
+                border-radius: 8px; font-size: 16px; font-weight: bold;
+            }
+        """)
         self._worker = None
 
     def _on_job_imported(self, result: object) -> None:
@@ -606,8 +672,14 @@ class ProcessWorkspace(QWidget):
         self.add_job_card(result.title, result.company, result.match_score, analysis, str(job.id))
 
     def _on_worker_failed(self, message: str) -> None:
-        self._start_btn.setEnabled(True)
-        self._start_btn.setText("Start Job Hunt")
+        self._toggle_btn.setEnabled(True)
+        self._toggle_btn.setText("Start Job Hunt")
+        self._toggle_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #adc6ff; color: #002e69; 
+                border-radius: 8px; font-size: 16px; font-weight: bold;
+            }
+        """)
         self.add_agent_message(f"Job workflow failed: {message}")
 
     def _open_for_review(self, job_id: str) -> None:

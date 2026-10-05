@@ -128,6 +128,10 @@ Job description:
     @staticmethod
     def _build_prompt(resume: str, job_description: str) -> str:
         return f"""You are an ATS resume analyst. Compare the resume against the job description.
+CRITICAL SCORING RULES:
+1. Seniority Mismatch: If the job is for an "Intern", "Entry-level", or "Junior" and the candidate is "Senior" or "Lead" (or vice versa), you MUST heavily penalize the score (cap it at 20% max), regardless of how many skills overlap. 
+2. Skill matching is secondary to role/seniority alignment.
+
 Return only valid JSON with this exact schema:
 {{
   "match_score": integer from 0 to 100,

@@ -59,15 +59,26 @@ class BrowserService:
         
         self._browser_context = await self._playwright.chromium.launch_persistent_context(
             user_data_dir=str(profile_path),
+            channel="chrome",
             headless=False,
             viewport={"width": win_w, "height": win_h},
-            args=[f"--window-position={win_x},{win_y}", f"--window-size={win_w},{win_h}"],
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
+            args=[
+                f"--window-position={win_x},{win_y}", 
+                f"--window-size={win_w},{win_h}",
+                "--disable-blink-features=AutomationControlled",
+                "--disable-infobars"
+            ],
+            ignore_default_args=["--enable-automation"],
         )
         self._browser_context.on("close", lambda ctx: self._on_disconnected(None))
         
+        def handle_new_page(new_page: Page):
+            self._page = new_page
+            
+        self._browser_context.on("page", handle_new_page)
+        
         if self._browser_context.pages:
-            self._page = self._browser_context.pages[0]
+            self._page = self._browser_context.pages[-1]
         else:
             self._page = await self._browser_context.new_page()
             

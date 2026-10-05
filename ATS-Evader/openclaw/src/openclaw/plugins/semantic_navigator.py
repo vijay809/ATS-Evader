@@ -110,6 +110,7 @@ class SemanticNavigator:
         try:
             future = asyncio.run_coroutine_threadsafe(DOMExtractor.get_interactive_state(page), self._browser._loop)
             dom_state = await asyncio.wrap_future(future)
+            logger.info(f"Extracted DOM state:\n{dom_state}")
         except Exception as e:
             return SemanticResult(reasoning="", action="", success=False, error=f"DOM Extraction failed: {e}")
 
@@ -157,7 +158,7 @@ class SemanticNavigator:
                 raise ValueError("CLICK requires a numeric ID")
             agent_id = match.group(1)
             # Force click bypasses visibility/intercept checks which often trip up AI
-            await page.locator(f'[data-agent-id="{agent_id}"]').click(timeout=3000, force=True)
+            await page.locator(f'[data-agent-id="{agent_id}"]').first.click(timeout=3000, force=True)
             
         elif action.upper().startswith("TYPE"):
             match = re.search(r"TYPE\s+(\d+)\s+(.+)", action, re.IGNORECASE)
@@ -165,7 +166,7 @@ class SemanticNavigator:
                 raise ValueError("TYPE requires an ID and text")
             agent_id = match.group(1)
             text = match.group(2).strip("\"'") # Strip quotes if LLM added them
-            await page.locator(f'[data-agent-id="{agent_id}"]').fill(text, timeout=3000, force=True)
+            await page.locator(f'[data-agent-id="{agent_id}"]').first.fill(text, timeout=3000, force=True)
             
         elif action.upper().startswith("UPLOAD"):
             match = re.search(r"UPLOAD\s+(\d+)", action, re.IGNORECASE)
@@ -174,7 +175,7 @@ class SemanticNavigator:
             agent_id = match.group(1)
             if not self._current_cv_path:
                 raise ValueError("UPLOAD action requested but no cv_path was provided to the navigator.")
-            await page.locator(f'[data-agent-id="{agent_id}"]').set_input_files(self._current_cv_path)
+            await page.locator(f'[data-agent-id="{agent_id}"]').first.set_input_files(self._current_cv_path)
             
         elif action.upper().strip() == "DONE":
             pass

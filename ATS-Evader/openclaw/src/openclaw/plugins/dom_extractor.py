@@ -29,6 +29,7 @@ class DOMElement:
 
 EXTRACT_JS = """
 () => {
+    document.querySelectorAll('[data-agent-id]').forEach(el => el.removeAttribute('data-agent-id'));
     let idCounter = 1;
     const elements = [];
     
