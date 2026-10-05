@@ -2,10 +2,11 @@
 from __future__ import annotations
 
 import asyncio
+import os
 from typing import TYPE_CHECKING
 
-from PySide6.QtCore import Qt, QThread, Signal
-from PySide6.QtGui import QShowEvent
+from PySide6.QtCore import Qt, QThread, Signal, QUrl
+from PySide6.QtGui import QShowEvent, QDesktopServices
 from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
@@ -117,6 +118,7 @@ class JobHuntWorker(QThread):
                 analysis = analysis_task.result()
                 
                 status = "Analyzed"
+                job_pdf_path: str | None = None
                 if analysis.match_score >= self.threshold:
                     msg = f"Score {analysis.match_score}% meets threshold! Tailoring CV..."
                     self.agent_message.emit(msg)
@@ -130,17 +132,17 @@ class JobHuntWorker(QThread):
                         
                     tailored = tailor_task.result()
                     
-                    msg = "CV Tailored! Generating PDF..."
+                    msg = "CV Tailored! Generating executive PDF..."
                     self.agent_message.emit(msg)
                     logger.info(msg)
                     
-                    import os
                     from openclaw.core.pdf_gen import PdfGenerator
                     import uuid
                     
                     job_id = str(uuid.uuid4())
                     pdf_path = os.path.join(os.getcwd(), "outputs", "resumes", f"cv_{job_id[:8]}.pdf")
                     pdf_path = await PdfGenerator.markdown_to_pdf(tailored.tailored_resume, pdf_path)
+                    job_pdf_path = pdf_path
                     
                     msg1 = f"PDF Generated at: {pdf_path}"
                     self.agent_message.emit(msg1)
@@ -163,9 +165,10 @@ class JobHuntWorker(QThread):
                     link,
                     analysis.match_score,
                     analysis.summary,
-                    analysis.recommendations
+                    analysis.recommendations,
+                    status=status,
+                    pdf_path=job_pdf_path,
                 )
-                job.status = status
                 self.job_found.emit(job)
                 
             self.agent_message.emit("Automated search complete. Awaiting further instructions.")
@@ -207,34 +210,74 @@ class AiChatWorker(QThread):
 
 class DocumentGeneratorWorker(QThread):
     agent_message = Signal(str)
+    pdf_ready = Signal(str, str)
     error = Signal(str)
     finished = Signal()
 
-    def __init__(self, analyzer: AtsAnalyzer, active_resume: str, job_description: str, doc_type: str):
+    def __init__(
+        self,
+        analyzer: AtsAnalyzer,
+        active_resume: str,
+        job_description: str,
+        doc_type: str,
+        candidate_name: str = "Applicant",
+        company_name: str = "Hiring Team",
+    ) -> None:
         super().__init__()
         self.analyzer = analyzer
         self.active_resume = active_resume
         self.job_description = job_description
         self.doc_type = doc_type
+        self.candidate_name = candidate_name
+        self.company_name = company_name
 
-    def run(self):
+    def run(self) -> None:
         try:
+            import os
+            import uuid
+            import asyncio
+            from openclaw.core.pdf_gen import PdfGenerator
+
             if self.doc_type == "cover_letter":
-                self.agent_message.emit("Drafting a punchy cover letter based on your master resume and the job description...")
+                self.agent_message.emit("Drafting an executive cover letter based on your master resume and the job description...")
                 result = self.analyzer.generate_cover_letter(self.active_resume, self.job_description)
-                msg = "📝 **Generated Cover Letter:**\n\n" + result.cover_letter
+
+                doc_id = str(uuid.uuid4())[:8]
+                out_dir = os.path.join(os.getcwd(), "outputs", "cover_letters")
+                os.makedirs(out_dir, exist_ok=True)
+                pdf_path = os.path.join(out_dir, f"cover_letter_{doc_id}.pdf")
+
+                asyncio.run(PdfGenerator.cover_letter_to_pdf(
+                    result.cover_letter,
+                    pdf_path,
+                    candidate_name=self.candidate_name,
+                    recipient_info=self.company_name,
+                ))
+
+                msg = f"📝 **Generated Cover Letter:**\n\n{result.cover_letter}\n\n📄 **Executive PDF Created:** `{pdf_path}`"
                 if result.warnings:
                     msg += "\n\n*Warnings: " + ", ".join(result.warnings) + "*"
                 self.agent_message.emit(msg)
+                self.pdf_ready.emit("cover_letter", pdf_path)
+
             elif self.doc_type == "tailor_cv":
                 self.agent_message.emit("Rewriting and optimizing your CV to match the job description's keywords...")
-                result = self.analyzer.tailor_resume(self.active_resume, self.job_description)
-                msg = "📄 **Tailored CV (Markdown format):**\n\n" + result.tailored_resume
-                if result.change_summary:
-                    msg += "\n\n*Changes made:*\n- " + "\n- ".join(result.change_summary)
-                if result.warnings:
-                    msg += "\n\n*Warnings: " + ", ".join(result.warnings) + "*"
+                tailor_result = self.analyzer.tailor_resume(self.active_resume, self.job_description)
+
+                doc_id = str(uuid.uuid4())[:8]
+                out_dir = os.path.join(os.getcwd(), "outputs", "resumes")
+                os.makedirs(out_dir, exist_ok=True)
+                pdf_path = os.path.join(out_dir, f"cv_{doc_id}.pdf")
+
+                asyncio.run(PdfGenerator.markdown_to_pdf(tailor_result.tailored_resume, pdf_path))
+
+                msg = f"📄 **Tailored CV Generated:**\n\n{tailor_result.tailored_resume}\n\n📄 **Executive PDF Created:** `{pdf_path}`"
+                if tailor_result.change_summary:
+                    msg += "\n\n*Changes made:*\n- " + "\n- ".join(tailor_result.change_summary)
+                if tailor_result.warnings:
+                    msg += "\n\n*Warnings: " + ", ".join(tailor_result.warnings) + "*"
                 self.agent_message.emit(msg)
+                self.pdf_ready.emit("tailor_cv", pdf_path)
         except Exception as e:
             self.error.emit(str(e))
         finally:
@@ -310,6 +353,18 @@ class ProcessWorkspace(QWidget):
         """)
         self._reset_btn.clicked.connect(self._reset_browser)
         sidebar_layout.addWidget(self._reset_btn)
+
+        self._folder_btn = QPushButton("Open Outputs Folder")
+        self._folder_btn.setMinimumHeight(40)
+        self._folder_btn.setStyleSheet("""
+            QPushButton {
+                background-color: transparent; color: #adc6ff; 
+                border: 1px solid #adc6ff; border-radius: 8px; font-size: 14px; font-weight: bold;
+            }
+            QPushButton:hover { background-color: rgba(173, 198, 255, 0.1); }
+        """)
+        self._folder_btn.clicked.connect(self._open_outputs_folder)
+        sidebar_layout.addWidget(self._folder_btn)
 
         # -- RIGHT MAIN AREA (Chat/Feed) --
         main_area = QWidget()
@@ -416,6 +471,11 @@ class ProcessWorkspace(QWidget):
         except LookupError:
             self._add_notice("Browser capability is unavailable.")
 
+    def _open_outputs_folder(self) -> None:
+        outputs_dir = os.path.join(os.getcwd(), "outputs")
+        os.makedirs(outputs_dir, exist_ok=True)
+        QDesktopServices.openUrl(QUrl.fromLocalFile(outputs_dir))
+
     def add_user_message(self, text: str):
         msg = QLabel(text)
         msg.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
@@ -459,6 +519,7 @@ class ProcessWorkspace(QWidget):
         match_score: int,
         analysis: list[str],
         job_id: str,
+        pdf_path: str | None = None,
     ) -> None:
         """Adds a job match card to the feed."""
         card = QFrame()
@@ -532,6 +593,14 @@ class ProcessWorkspace(QWidget):
         
         actions_layout.addWidget(approve_btn)
         actions_layout.addWidget(applied_btn)
+
+        if pdf_path and os.path.exists(pdf_path):
+            open_cv_btn = QPushButton("Open Tailored CV")
+            open_cv_btn.setMinimumHeight(40)
+            open_cv_btn.setStyleSheet("background-color: rgba(173, 198, 255, 0.15); color: #adc6ff; border: 1px solid rgba(173, 198, 255, 0.35); border-radius: 6px; font-weight: bold;")
+            open_cv_btn.clicked.connect(lambda checked=False, p=pdf_path: QDesktopServices.openUrl(QUrl.fromLocalFile(p)))
+            actions_layout.addWidget(open_cv_btn)
+
         actions_layout.addWidget(cover_letter_btn)
         actions_layout.addWidget(tailor_cv_btn)
         actions_layout.addWidget(skip_btn)
@@ -552,12 +621,37 @@ class ProcessWorkspace(QWidget):
                 self._add_notice("Job data missing.")
                 return
                 
-            self._worker = DocumentGeneratorWorker(analyzer, active_resume.raw_content, job.content, doc_type)
+            candidate_name = "Applicant"
+            try:
+                import json
+                parsed = json.loads(active_resume.parsed_json)
+                if isinstance(parsed, dict) and "preferences" in parsed:
+                    candidate_name = parsed["preferences"].get("Candidate Name", "Applicant")
+            except Exception:
+                pass
+
+            company_name = "Hiring Team"
+            if " at " in job.name:
+                company_name = job.name.split(" at ", 1)[1]
+
+            self._worker = DocumentGeneratorWorker(
+                analyzer,
+                active_resume.raw_content,
+                job.content,
+                doc_type,
+                candidate_name=candidate_name,
+                company_name=company_name,
+            )
             self._worker.agent_message.connect(self.add_agent_message)
+            self._worker.pdf_ready.connect(self._on_pdf_ready)
             self._worker.error.connect(self._on_worker_failed)
             self._worker.start()
         except Exception as e:
             self._on_worker_failed(str(e))
+
+    def _on_pdf_ready(self, doc_type: str, pdf_path: str) -> None:
+        if os.path.exists(pdf_path):
+            QDesktopServices.openUrl(QUrl.fromLocalFile(pdf_path))
 
     def start_job_hunt(self) -> None:
         """Automated Job Hunt: searches Naukri, extracts JDs, and scores them locally."""
@@ -663,7 +757,8 @@ class ProcessWorkspace(QWidget):
         )
         self._runtime.plugins._context.documents.save_job_description(job)
         analysis = [result.summary, *result.recommendations[:3]]
-        self.add_job_card(result.title, result.company, result.match_score, analysis, str(job.id))
+        pdf_path = getattr(result, "pdf_path", None)
+        self.add_job_card(result.title, result.company, result.match_score, analysis, str(job.id), pdf_path=pdf_path)
 
     def _on_worker_failed(self, message: str) -> None:
         self._toggle_btn.setEnabled(True)
@@ -713,6 +808,8 @@ class ImportedJob:
         match_score: int,
         summary: str,
         recommendations: list[str],
+        status: str = "Analyzed",
+        pdf_path: str | None = None,
     ) -> None:
         self.title = title
         self.company = company
@@ -721,6 +818,8 @@ class ImportedJob:
         self.match_score = match_score
         self.summary = summary
         self.recommendations = recommendations
+        self.status = status
+        self.pdf_path = pdf_path
 
 
 class BrowserLaunchWorker(QThread):
