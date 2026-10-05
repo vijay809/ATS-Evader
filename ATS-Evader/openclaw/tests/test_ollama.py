@@ -32,3 +32,31 @@ async def test_generate_rejects_invalid_server_responses() -> None:
     with pytest.raises(OllamaUnavailableError, match="without generated text"):
         await client.generate("Create a summary")
 
+
+async def test_generate_supports_json_format_and_options() -> None:
+    sent: dict[str, object] = {}
+
+    def sender(url: str, payload: dict[str, object], timeout: float) -> dict[str, object]:
+        sent.update(url=url, payload=payload, timeout=timeout)
+        return {"model": "test-model", "response": '{"score": 90}'}
+
+    client = OllamaClient(OllamaSettings(base_url="http://localhost:11434"), sender)
+
+    completion = await client.generate(
+        "Analyze this",
+        model="test-model",
+        system="You are an expert",
+        format="json",
+        temperature=0.2,
+    )
+
+    assert completion.text == '{"score": 90}'
+    assert sent["payload"] == {
+        "model": "test-model",
+        "prompt": "Analyze this",
+        "stream": False,
+        "system": "You are an expert",
+        "format": "json",
+        "options": {"temperature": 0.2},
+    }
+

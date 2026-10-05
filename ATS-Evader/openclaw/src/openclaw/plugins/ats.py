@@ -65,7 +65,13 @@ class AtsAnalyzer:
         prompt = self._build_prompt(resume, job_description)
         
         for attempt in range(3):
-            completion = await self._client.generate(prompt, model=model)
+            completion = await self._client.generate(
+                prompt,
+                model=model,
+                format="json",
+                temperature=0.1,
+                system="You are an expert ATS (Applicant Tracking System) auditor and recruitment analyst. You strictly evaluate resume-to-job alignment without hallucinations.",
+            )
             try:
                 return self._parse_analysis(completion.text)
             except AtsAnalysisError as error:
@@ -92,7 +98,13 @@ Job description:
 {job_description}
 ---"""
         for attempt in range(3):
-            completion = await self._client.generate(prompt, model=model)
+            completion = await self._client.generate(
+                prompt,
+                model=model,
+                format="json",
+                temperature=0.0,
+                system="You are a precise data extractor. Extract only explicit factual requirements from the job description.",
+            )
             try:
                 parsed_dict = AtsAnalyzer._parse_json(completion.text)
                 return EligibilityFacts.model_validate(parsed_dict)
@@ -115,7 +127,13 @@ Job description:
         prompt = self._build_tailoring_prompt(resume, job_description)
         
         for attempt in range(3):
-            completion = await self._client.generate(prompt, model=model)
+            completion = await self._client.generate(
+                prompt,
+                model=model,
+                format="json",
+                temperature=0.2,
+                system="You are an executive resume writer and ATS optimization specialist. You rewrite resumes to maximize ATS keyword alignment using the STAR methodology (Situation, Task, Action, Result) with strong metrics while strictly preserving factual honesty.",
+            )
             try:
                 return self._parse_tailoring(completion.text)
             except AtsAnalysisError as error:
@@ -127,12 +145,15 @@ Job description:
 
     @staticmethod
     def _build_prompt(resume: str, job_description: str) -> str:
-        return f"""You are an ATS resume analyst. Compare the resume against the job description.
-CRITICAL SCORING RULES:
-1. Seniority Mismatch: If the job is for an "Intern", "Entry-level", or "Junior" and the candidate is "Senior" or "Lead" (or vice versa), you MUST heavily penalize the score (cap it at 20% max), regardless of how many skills overlap. 
-2. Skill matching is secondary to role/seniority alignment.
+        return f"""Compare the candidate's resume against the job description with calibrated scoring:
 
-Return only valid JSON with this exact schema:
+EVALUATION WEIGHTS:
+1. Role & Seniority Match (30%): If the seniority level clashes (e.g., Senior applying for Junior/Intern or vice versa), cap total score at 20% max regardless of skill overlap.
+2. Core Technical Skills & Tooling (40%): Overlap between explicitly mentioned tech stack in the JD and candidate's hands-on experience.
+3. Domain & Functional Experience (20%): Relevance of industry background and problem domain.
+4. Education, Certifications & Credentials (10%).
+
+Return ONLY valid JSON with this exact schema:
 {{
   "match_score": integer from 0 to 100,
   "matched_keywords": [string],
@@ -153,7 +174,7 @@ Job description:
 
     @staticmethod
     def _build_tailoring_prompt(resume: str, job_description: str) -> str:
-        return f"""You are a careful resume editor. Tailor the supplied resume for the job description.
+        return f"""You are an executive resume editor. Tailor the supplied resume for the job description.
 Never invent achievements, employers, titles, dates, degrees, certifications, skills, tools, or metrics.
 Keep every factual claim grounded in the original resume. If a requirement is unsupported, place it in warnings.
 Return only valid JSON with this exact schema:
@@ -174,9 +195,13 @@ Job description:
 ---"""
 
     def tailor_resume(self, master_resume: str, job_description: str, model_id: str | None = None) -> TailoredResume:
-        prompt = f"""You are an expert ATS optimizer and resume writer.
-I will provide a master resume and a job description.
-Tailor the resume to match the job description perfectly while remaining truthful.
+        prompt = f"""Tailor the candidate's master resume to match the job description with maximum ATS impact while remaining 100% truthful.
+
+STRICT TAILORING DIRECTIVES:
+1. ZERO FABRICATION: Never invent qualifications, employers, degrees, dates, tools, or metrics not grounded in the master resume.
+2. ATS KEYWORD ALIGNMENT: Seamlessly re-frame existing achievements to adopt the exact terminology and phrasing found in the job description.
+3. EXECUTIVE STAR BULLETS: Every bullet in Work Experience must follow the STAR method (Action Verb + Context/Problem + Solution + Quantified Outcome where available).
+4. MARKDOWN STRUCTURE: The 'tailored_resume' field must be clean, executive Markdown formatted with # Name & Title, ## Summary, ## Technical Skills, ## Professional Experience, ## Education. Do NOT wrap the JSON response in code fences.
 
 <JOB_DESCRIPTION>
 {job_description}
@@ -188,13 +213,21 @@ Tailor the resume to match the job description perfectly while remaining truthfu
 
 Respond ONLY with valid JSON matching this schema:
 {{
-  "tailored_resume": "The full text of the tailored resume (use Markdown for formatting)",
-  "change_summary": ["Changed X to Y", "Added emphasis on Z"],
-  "warnings": ["Could not match requirement A"]
+  "tailored_resume": "The full text of the tailored resume in clean executive Markdown",
+  "change_summary": ["List of specific adjustments and keyword additions made"],
+  "warnings": ["Any hard requirements from the JD that could not be satisfied truthfully"]
 }}
 """
         import asyncio
-        response = asyncio.run(self._client.generate(prompt, model=model_id))
+        response = asyncio.run(
+            self._client.generate(
+                prompt,
+                model=model_id,
+                format="json",
+                temperature=0.2,
+                system="You are an executive resume writer and ATS optimization specialist. You rewrite resumes to maximize ATS keyword alignment using the STAR methodology (Situation, Task, Action, Result) with strong metrics while strictly preserving factual honesty.",
+            )
+        )
         try:
             parsed_dict = AtsAnalyzer._parse_json(response.text)
             return TailoredResume.model_validate(parsed_dict)
@@ -203,10 +236,14 @@ Respond ONLY with valid JSON matching this schema:
             raise AtsAnalysisError("Invalid tailor response from model") from e
 
     def generate_cover_letter(self, master_resume: str, job_description: str, model_id: str | None = None) -> CoverLetter:
-        prompt = f"""You are an expert career coach and copywriter.
-I will provide a master resume and a job description.
-Write a concise, compelling cover letter (or cold email) that highlights the intersection of the candidate's experience and the job's needs.
-Do NOT invent facts, skills, or experience. Use a professional but punchy tone.
+        prompt = f"""Write an executive, persuasive cover letter bridging the candidate's verified experience with the company's specific needs.
+
+COVER LETTER RULES:
+1. HIGH-IMPACT HOOK: Start directly with a compelling thesis statement highlighting the candidate's relevant background and immediate value proposition. NEVER use generic openings like "I am writing to express my interest in..." or "Enclosed please find my resume".
+2. PAIN-POINT MAPPING: In 2-3 body paragraphs, connect 2 major challenges described in the job description to concrete achievements from the master resume.
+3. TONE: Confident, collaborative, concise, executive.
+4. HONESTY: Do not invent projects or skills.
+5. FORMATTING: Return clean Markdown with paragraphs. Do not wrap the JSON response in code fences.
 
 <JOB_DESCRIPTION>
 {job_description}
@@ -218,12 +255,20 @@ Do NOT invent facts, skills, or experience. Use a professional but punchy tone.
 
 Respond ONLY with valid JSON matching this schema:
 {{
-  "cover_letter": "The full text of the cover letter (use Markdown)",
+  "cover_letter": "The full text of the cover letter in Markdown",
   "warnings": ["Any missing requirements you couldn't address"]
 }}
 """
         import asyncio
-        response = asyncio.run(self._client.generate(prompt, model=model_id))
+        response = asyncio.run(
+            self._client.generate(
+                prompt,
+                model=model_id,
+                format="json",
+                temperature=0.4,
+                system="You are an elite executive career coach and copywriter. You write compelling, modern cover letters that open with a high-impact hook demonstrating candidate-company fit, avoiding robotic cliches.",
+            )
+        )
         try:
             parsed_dict = AtsAnalyzer._parse_json(response.text)
             return CoverLetter.model_validate(parsed_dict)
@@ -251,7 +296,15 @@ Respond ONLY with valid JSON matching this schema:
 }}
 """
         import asyncio
-        response = asyncio.run(self._client.generate(prompt, model=model_id))
+        response = asyncio.run(
+            self._client.generate(
+                prompt,
+                model=model_id,
+                format="json",
+                temperature=0.0,
+                system="You are a structured CV data extraction engine. Extract preferences and core skills into clean structured JSON.",
+            )
+        )
         try:
             parsed_dict = AtsAnalyzer._parse_json(response.text)
             return ParsedResumeData.model_validate(parsed_dict)

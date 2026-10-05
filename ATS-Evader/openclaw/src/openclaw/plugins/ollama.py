@@ -41,7 +41,16 @@ class OllamaClient:
         self._settings = settings
         self._sender = sender or self._send_json
 
-    async def generate(self, prompt: str, *, model: str | None = None) -> OllamaCompletion:
+    async def generate(
+        self,
+        prompt: str,
+        *,
+        model: str | None = None,
+        system: str | None = None,
+        format: str | None = None,
+        temperature: float | None = None,
+        options: dict[str, Any] | None = None,
+    ) -> OllamaCompletion:
         if not prompt.strip():
             raise ValueError("Prompt must not be empty")
         selected_model = model or self._settings.default_model
@@ -50,11 +59,29 @@ class OllamaClient:
             if not models:
                 raise OllamaUnavailableError("No AI models installed in local Ollama.")
             selected_model = models[0]
-            
+
+        payload: dict[str, Any] = {
+            "model": selected_model,
+            "prompt": prompt,
+            "stream": False,
+        }
+        if system:
+            payload["system"] = system
+        if format:
+            payload["format"] = format
+
+        call_options: dict[str, Any] = {}
+        if temperature is not None:
+            call_options["temperature"] = temperature
+        if options:
+            call_options.update(options)
+        if call_options:
+            payload["options"] = call_options
+
         response = await asyncio.to_thread(
             self._sender,
             f"{self._settings.base_url.rstrip('/')}/api/generate",
-            {"model": selected_model, "prompt": prompt, "stream": False},
+            payload,
             self._settings.timeout_seconds,
         )
         text = response.get("response")

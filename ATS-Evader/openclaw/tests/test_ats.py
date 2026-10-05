@@ -8,7 +8,7 @@ class StubOllamaClient:
     def __init__(self, response: str) -> None:
         self.response = response
 
-    async def generate(self, prompt: str, *, model: str | None = None) -> OllamaCompletion:
+    async def generate(self, prompt: str, *, model: str | None = None, **_kwargs: object) -> OllamaCompletion:
         return OllamaCompletion(model=model or "test-model", text=self.response)
 
 
@@ -52,7 +52,7 @@ async def test_ats_analysis_retries_on_invalid_json() -> None:
         def __init__(self) -> None:
             self.calls = 0
 
-        async def generate(self, prompt: str, *, model: str | None = None) -> OllamaCompletion:
+        async def generate(self, prompt: str, *, model: str | None = None, **_kwargs: object) -> OllamaCompletion:
             self.calls += 1
             if self.calls == 1:
                 return OllamaCompletion(model=model or "test-model", text="Invalid Response")
@@ -74,7 +74,7 @@ async def test_ats_analysis_fails_after_max_retries() -> None:
         def __init__(self) -> None:
             self.calls = 0
 
-        async def generate(self, prompt: str, *, model: str | None = None) -> OllamaCompletion:
+        async def generate(self, prompt: str, *, model: str | None = None, **_kwargs: object) -> OllamaCompletion:
             self.calls += 1
             return OllamaCompletion(model=model or "test-model", text="Still Invalid")
 
