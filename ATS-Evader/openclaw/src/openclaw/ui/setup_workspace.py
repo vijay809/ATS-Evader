@@ -2,13 +2,16 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from datetime import datetime
-from typing import TYPE_CHECKING
+from pathlib import Path
+from typing import TYPE_CHECKING, Any
 from PySide6.QtCore import Qt, QThread, Signal, QSize
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
-    QPlainTextEdit, QPushButton, QMessageBox, QScrollArea, QFrame, QSizePolicy
+    QPlainTextEdit, QPushButton, QMessageBox, QScrollArea, QFrame, QSizePolicy,
+    QFileDialog
 )
 
 from openclaw.core.documents import StructuredResume, Preference
@@ -22,7 +25,7 @@ from openclaw.ui.terminal_loader import TerminalLoaderOverlay
 
 class HistoryProfileWidget(QFrame):
     """Expandable accordion for historical profiles."""
-    def __init__(self, resume: StructuredResume, on_set_active: callable, on_delete: callable) -> None:
+    def __init__(self, resume: StructuredResume, on_set_active: Callable[[str], None], on_delete: Callable[[str], None]) -> None:
         super().__init__()
         self.resume = resume
         self.on_set_active = on_set_active
@@ -125,8 +128,8 @@ class HistoryProfileWidget(QFrame):
         self.details_widget.hide()
         self.main_layout.addWidget(self.details_widget)
         
-    def mousePressEvent(self, event):
-        if event.button() == Qt.LeftButton:
+    def mousePressEvent(self, event: Any) -> None:
+        if event.button() == Qt.MouseButton.LeftButton:
             self.is_expanded = not self.is_expanded
             if self.is_expanded:
                 self.details_widget.show()
@@ -134,6 +137,115 @@ class HistoryProfileWidget(QFrame):
             else:
                 self.details_widget.hide()
                 self.expand_icon.setText("▼")
+
+
+class ResumeDropZone(QFrame):
+    file_selected = Signal(str)
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setAcceptDrops(True)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._default_style = """
+            ResumeDropZone {
+                background-color: rgba(255, 255, 255, 0.02);
+                border: 1.5px dashed rgba(173, 198, 255, 0.3);
+                border-radius: 10px;
+            }
+            ResumeDropZone:hover {
+                background-color: rgba(173, 198, 255, 0.06);
+                border-color: #adc6ff;
+            }
+        """
+        self._hover_style = """
+            ResumeDropZone {
+                background-color: rgba(173, 198, 255, 0.12);
+                border: 2px dashed #adc6ff;
+                border-radius: 10px;
+            }
+        """
+        self.setStyleSheet(self._default_style)
+
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(16, 14, 16, 14)
+        layout.setSpacing(16)
+
+        icon = QLabel("📄")
+        icon.setStyleSheet("font-size: 24px; border: none; background: transparent;")
+
+        text_layout = QVBoxLayout()
+        text_layout.setSpacing(2)
+        title = QLabel("Import Master Resume (PDF, DOCX, TXT)")
+        title.setStyleSheet("color: #adc6ff; font-weight: bold; font-size: 13px; border: none; background: transparent;")
+        subtitle = QLabel("Drag & drop your document here, or click Browse Files to select")
+        subtitle.setStyleSheet("color: #8b90a0; font-size: 11px; border: none; background: transparent;")
+        text_layout.addWidget(title)
+        text_layout.addWidget(subtitle)
+
+        self.status_lbl = QLabel("")
+        self.status_lbl.setStyleSheet("color: #a5d6a7; font-size: 11px; font-weight: bold; border: none; background: transparent;")
+
+        browse_btn = QPushButton("Browse Files")
+        browse_btn.setStyleSheet("""
+            QPushButton {
+                background-color: rgba(173, 198, 255, 0.15);
+                color: #adc6ff;
+                border: 1px solid rgba(173, 198, 255, 0.3);
+                border-radius: 6px;
+                padding: 6px 14px;
+                font-weight: bold;
+                font-size: 11px;
+            }
+            QPushButton:hover {
+                background-color: rgba(173, 198, 255, 0.25);
+            }
+        """)
+        browse_btn.clicked.connect(self._open_file_dialog)
+
+        layout.addWidget(icon)
+        layout.addLayout(text_layout, stretch=1)
+        layout.addWidget(self.status_lbl)
+        layout.addWidget(browse_btn)
+
+    def mousePressEvent(self, event: Any) -> None:
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._open_file_dialog()
+
+    def _open_file_dialog(self) -> None:
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Select Resume Document",
+            "",
+            "Resume Files (*.pdf *.docx *.txt *.md);;PDF Files (*.pdf);;Word Documents (*.docx);;All Files (*)",
+        )
+        if file_path:
+            self.file_selected.emit(file_path)
+
+    def dragEnterEvent(self, event: Any) -> None:
+        if event.mimeData().hasUrls():
+            urls = event.mimeData().urls()
+            if urls:
+                path = urls[0].toLocalFile().lower()
+                if any(path.endswith(ext) for ext in [".pdf", ".docx", ".txt", ".md"]):
+                    self.setStyleSheet(self._hover_style)
+                    event.acceptProposedAction()
+                    return
+        event.ignore()
+
+    def dragLeaveEvent(self, event: Any) -> None:
+        self.setStyleSheet(self._default_style)
+
+    def dropEvent(self, event: Any) -> None:
+        self.setStyleSheet(self._default_style)
+        if event.mimeData().hasUrls():
+            urls = event.mimeData().urls()
+            if urls:
+                file_path = urls[0].toLocalFile()
+                if any(file_path.lower().endswith(ext) for ext in [".pdf", ".docx", ".txt", ".md"]):
+                    self.file_selected.emit(file_path)
+                    event.acceptProposedAction()
+                    return
+        event.ignore()
 
 
 class SetupWorkspace(QWidget):
@@ -164,16 +276,21 @@ class SetupWorkspace(QWidget):
         header = QLabel("System Setup")
         header.setStyleSheet("font-size: 32px; font-weight: 600; color: #e5e2e1; border: none;")
         
-        desc = QLabel("Initialize the AI matching engine by providing a comprehensive master resume.")
+        desc = QLabel("Initialize the AI matching engine by uploading or providing a comprehensive master resume.")
         desc.setStyleSheet("font-size: 16px; color: #c1c6d7; border: none;")
         desc.setWordWrap(True)
 
         layout.addWidget(header)
         layout.addWidget(desc)
 
+        # File Drop Zone
+        self._drop_zone = ResumeDropZone(self)
+        self._drop_zone.file_selected.connect(self._on_file_loaded)
+        layout.addWidget(self._drop_zone)
+
         # Main Input Area
         self._text_area = QPlainTextEdit()
-        self._text_area.setPlaceholderText("Paste master resume, core job description, or structural requirements here...")
+        self._text_area.setPlaceholderText("Or paste master resume text directly here...")
         self._text_area.setMinimumHeight(200)
         self._text_area.setStyleSheet("background-color: #080808; color: #e5e2e1; padding: 16px; border-radius: 8px;")
         
@@ -322,6 +439,21 @@ class SetupWorkspace(QWidget):
                 self._refresh_profiles()
             except Exception as e:
                 QMessageBox.warning(self, "Error", f"Failed to delete profile: {e}")
+
+    def _on_file_loaded(self, file_path: str) -> None:
+        try:
+            try:
+                ingest_service = self._runtime.services.get("documents.ingestion")
+            except LookupError:
+                from openclaw.plugins.documents import DocumentIngestionService
+                ingest_service = DocumentIngestionService()
+
+            text = ingest_service.read_text(file_path)
+            self._text_area.setPlainText(text)
+            file_name = Path(file_path).name
+            self._drop_zone.status_lbl.setText(f"✓ Loaded: {file_name}")
+        except Exception as e:
+            QMessageBox.warning(self, "Document Load Error", f"Failed to extract text from {file_path}: {e}")
 
     def _on_parse(self) -> None:
         text = self._text_area.toPlainText().strip()
