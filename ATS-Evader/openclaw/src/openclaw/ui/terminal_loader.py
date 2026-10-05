@@ -42,6 +42,7 @@ class LoaderTask(QThread):
 
 class TerminalLoaderOverlay(QFrame):
     """An overlay widget that displays a terminal-like sequence of events."""
+    sequence_completed = Signal()
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -279,6 +280,7 @@ class TerminalLoaderOverlay(QFrame):
         self._progress.setValue(100)
         self._current_pct = 100
         self._close_btn.show()
+        self.sequence_completed.emit()
 
     def resizeEvent(self, event: Any) -> None:
         super().resizeEvent(event)

@@ -132,7 +132,7 @@ Job description:
                 model=model,
                 format="json",
                 temperature=0.2,
-                system="You are an executive resume writer and ATS optimization specialist. You rewrite resumes to maximize ATS keyword alignment using the STAR methodology (Situation, Task, Action, Result) with strong metrics while strictly preserving factual honesty.",
+                system="You are an executive resume writer and ATS optimization strategist. You craft high-impact resumes where every achievement bullet begins with an active verb and includes quantifiable metrics. NEVER output literal labels like Situation, Task, Action, or Result.",
             )
             try:
                 return self._parse_tailoring(completion.text)
@@ -174,50 +174,43 @@ Job description:
 
     @staticmethod
     def _build_tailoring_prompt(resume: str, job_description: str) -> str:
-        return f"""You are an executive resume editor. Tailor the supplied resume for the job description.
-Never invent achievements, employers, titles, dates, degrees, certifications, skills, tools, or metrics.
-Keep every factual claim grounded in the original resume. If a requirement is unsupported, place it in warnings.
-Return only valid JSON with this exact schema:
-{{
-  "tailored_resume": string,
-  "change_summary": [string],
-  "warnings": [string]
-}}
-
-Resume:
----
-{resume}
----
-
-Job description:
----
-{job_description}
----"""
-
-    def tailor_resume(self, master_resume: str, job_description: str, model_id: str | None = None) -> TailoredResume:
-        prompt = f"""Tailor the candidate's master resume to match the job description with maximum ATS impact while remaining 100% truthful.
+        return f"""You are an elite executive resume writer and ATS optimization strategist. Tailor the candidate's master resume for the provided job description with maximum ATS keyword synergy while remaining 100% truthful.
 
 STRICT TAILORING DIRECTIVES:
-1. ZERO FABRICATION: Never invent qualifications, employers, degrees, dates, tools, or metrics not grounded in the master resume.
+1. ZERO FABRICATION: Never invent qualifications, employers, degrees, dates, tools, or metrics not grounded in the master resume. If a JD requirement cannot be satisfied truthfully, record it in warnings.
 2. ATS KEYWORD ALIGNMENT: Seamlessly re-frame existing achievements to adopt the exact terminology and phrasing found in the job description.
-3. EXECUTIVE STAR BULLETS: Every bullet in Work Experience must follow the STAR method (Action Verb + Context/Problem + Solution + Quantified Outcome where available).
-4. MARKDOWN STRUCTURE: The 'tailored_resume' field must be clean, executive Markdown formatted with # Name & Title, ## Summary, ## Technical Skills, ## Professional Experience, ## Education. Do NOT wrap the JSON response in code fences.
+3. EXECUTIVE BULLET FORMATTING:
+   - Every bullet in Professional Experience MUST begin with a strong past-tense action verb (e.g., "Architected", "Engineered", "Optimized", "Spearheaded", "Led").
+   - Frame accomplishments with quantifiable outcomes and metrics (e.g., latency, throughput, team velocity, test coverage).
+   - NEVER output the literal words "Situation:", "Task:", "Action:", or "Result:" in bullet points or anywhere in the resume. Combine context, action, and metrics into a single cohesive bullet point.
+4. CLEAN STRUCTURE & ZERO HALLUCINATIONS IN HEADINGS:
+   - Line 1 MUST be `# Full Name` (e.g., `# Vijay Kumar Srivastava`). NEVER append parentheticals, notes, or role tags like "(Applying for ...)" or "(Tech Lead)".
+   - Line 2 MUST be the target professional title (e.g., `Senior Software Engineer`).
+   - Line 3 MUST be contact information (e.g., `City, State | Phone | Email | LinkedIn | GitHub`).
+   - Use standard markdown headings: `## Professional Summary`, `## Technical Skills`, `## Professional Experience`, `## Key Projects`, `## Education`.
+   - In Technical Skills, group skills cleanly: `* **Category:** Skill 1, Skill 2, Skill 3`.
+   - In Professional Experience, format roles as:
+     `### Job Title — Company Name`
+     `#### Month Year – Month Year | City, State`
+   - NEVER include sections for "References", "Availability", or "Objective".
 
 <JOB_DESCRIPTION>
 {job_description}
 </JOB_DESCRIPTION>
 
 <MASTER_RESUME>
-{master_resume}
+{resume}
 </MASTER_RESUME>
 
-Respond ONLY with valid JSON matching this schema:
+Respond ONLY with valid JSON matching this exact schema:
 {{
-  "tailored_resume": "The full text of the tailored resume in clean executive Markdown",
+  "tailored_resume": "Full tailored resume in clean executive Markdown matching the instructions above",
   "change_summary": ["List of specific adjustments and keyword additions made"],
   "warnings": ["Any hard requirements from the JD that could not be satisfied truthfully"]
-}}
-"""
+}}"""
+
+    def tailor_resume(self, master_resume: str, job_description: str, model_id: str | None = None) -> TailoredResume:
+        prompt = self._build_tailoring_prompt(master_resume, job_description)
         import asyncio
         response = asyncio.run(
             self._client.generate(
@@ -225,7 +218,7 @@ Respond ONLY with valid JSON matching this schema:
                 model=model_id,
                 format="json",
                 temperature=0.2,
-                system="You are an executive resume writer and ATS optimization specialist. You rewrite resumes to maximize ATS keyword alignment using the STAR methodology (Situation, Task, Action, Result) with strong metrics while strictly preserving factual honesty.",
+                system="You are an executive resume writer and ATS optimization strategist. You craft high-impact resumes where every achievement bullet begins with an active verb and includes quantifiable metrics. NEVER output literal labels like Situation, Task, Action, or Result.",
             )
         )
         try:

@@ -34,7 +34,6 @@ class JobHuntWorker(QThread):
     job_found = Signal(object) # Will emit ImportedJob
     agent_message = Signal(str)
     error = Signal(str)
-    finished = Signal()
 
     def __init__(self, browser_service: BrowserService, ats_analyzer: AtsAnalyzer, active_resume: str, role: str, location: str, min_exp: int, win_x: int = 0, win_y: int = 0, win_w: int = 1280, win_h: int = 800, threshold: int = 50):
         super().__init__()
@@ -51,8 +50,10 @@ class JobHuntWorker(QThread):
         self.win_h = win_h
 
     def run(self) -> None:
-        asyncio.run(self.do_hunt())
-        self.finished.emit()
+        try:
+            asyncio.run(self.do_hunt())
+        except Exception as e:
+            self.error.emit(str(e))
 
     async def do_hunt(self) -> None:
         try:
@@ -183,7 +184,6 @@ class JobHuntWorker(QThread):
 class AiChatWorker(QThread):
     agent_message = Signal(str)
     error = Signal(str)
-    finished = Signal()
 
     def __init__(self, navigator: SemanticNavigator, command: str) -> None:
         super().__init__()
@@ -191,8 +191,10 @@ class AiChatWorker(QThread):
         self.command = command
 
     def run(self) -> None:
-        asyncio.run(self.do_chat())
-        self.finished.emit()
+        try:
+            asyncio.run(self.do_chat())
+        except Exception as e:
+            self.error.emit(str(e))
 
     async def do_chat(self) -> None:
         try:
@@ -213,7 +215,6 @@ class DocumentGeneratorWorker(QThread):
     agent_message = Signal(str)
     pdf_ready = Signal(str, str)
     error = Signal(str)
-    finished = Signal()
 
     def __init__(
         self,
@@ -282,8 +283,6 @@ class DocumentGeneratorWorker(QThread):
                 self.pdf_ready.emit("tailor_cv", pdf_path)
         except Exception as e:
             self.error.emit(str(e))
-        finally:
-            self.finished.emit()
 
 class ProcessWorkspace(QWidget):
     """The central dashboard for agent interaction and job approvals."""
@@ -291,8 +290,10 @@ class ProcessWorkspace(QWidget):
     def __init__(self, runtime: Runtime) -> None:
         super().__init__()
         self._runtime = runtime
-        self._worker: QThread | None = None
-        self._chat_worker: QThread | None = None
+        self._hunt_worker: JobHuntWorker | None = None
+        self._doc_workers: list[DocumentGeneratorWorker] = []
+        self._browser_workers: list[BrowserLaunchWorker] = []
+        self._chat_worker: AiChatWorker | None = None
 
         main_layout = QHBoxLayout(self)
         main_layout.setContentsMargins(0, 0, 0, 0)
@@ -639,7 +640,7 @@ class ProcessWorkspace(QWidget):
             if " at " in job.name:
                 company_name = job.name.split(" at ", 1)[1]
 
-            self._worker = DocumentGeneratorWorker(
+            worker = DocumentGeneratorWorker(
                 analyzer,
                 active_resume.raw_content,
                 job.content,
@@ -647,12 +648,24 @@ class ProcessWorkspace(QWidget):
                 candidate_name=candidate_name,
                 company_name=company_name,
             )
-            self._worker.agent_message.connect(self.add_agent_message)
-            self._worker.pdf_ready.connect(self._on_pdf_ready)
-            self._worker.error.connect(self._on_worker_failed)
-            self._worker.start()
+            self._doc_workers.append(worker)
+            worker.agent_message.connect(self.add_agent_message)
+            worker.pdf_ready.connect(self._on_pdf_ready)
+            worker.error.connect(self._on_worker_failed)
+            worker.finished.connect(lambda w=worker: self._cleanup_doc_worker(w))
+            worker.start()
         except Exception as e:
             self._on_worker_failed(str(e))
+
+    def _cleanup_doc_worker(self, worker: DocumentGeneratorWorker) -> None:
+        if worker in self._doc_workers:
+            self._doc_workers.remove(worker)
+        worker.deleteLater()
+
+    def _cleanup_browser_worker(self, worker: BrowserLaunchWorker) -> None:
+        if worker in self._browser_workers:
+            self._browser_workers.remove(worker)
+        worker.deleteLater()
 
     def _on_pdf_ready(self, doc_type: str, pdf_path: str) -> None:
         if os.path.exists(pdf_path):
@@ -688,6 +701,10 @@ class ProcessWorkspace(QWidget):
                 self._add_notice("Browser or ATS capability is not configured correctly.")
                 return
                 
+            if self._hunt_worker and self._hunt_worker.isRunning():
+                self.add_agent_message("Job hunt is already in progress.")
+                return
+
             # Resize app to left 50% and put browser on right 50%
             from PySide6.QtGui import QGuiApplication
             screen = QGuiApplication.primaryScreen()
@@ -711,29 +728,29 @@ class ProcessWorkspace(QWidget):
             self.add_agent_message(f"Beginning automated job hunt for '{role}' in '{location}'...")
             
             threshold = self._threshold_slider.value()
-            self._worker = JobHuntWorker(
+            self._hunt_worker = JobHuntWorker(
                 browser, analyzer, active_resume.raw_content, role, location, min_exp,
                 win_x=avail_geo.x() + w, win_y=y_pos, win_w=w, win_h=h, threshold=threshold
             )
-            self._worker.agent_message.connect(self.add_agent_message)
-            self._worker.job_found.connect(self._on_job_imported)
-            self._worker.error.connect(self._on_worker_failed)
-            self._worker.finished.connect(self._on_hunt_finished)
-            self._worker.start()
+            self._hunt_worker.agent_message.connect(self.add_agent_message)
+            self._hunt_worker.job_found.connect(self._on_job_imported)
+            self._hunt_worker.error.connect(self._on_worker_failed)
+            self._hunt_worker.finished.connect(self._on_hunt_finished)
+            self._hunt_worker.start()
             
         except Exception as e:
             self._on_worker_failed(str(e))
 
     def toggle_job_hunt(self) -> None:
-        if self._worker and self._worker.isRunning():
+        if self._hunt_worker and self._hunt_worker.isRunning():
             self.stop_job_hunt()
         else:
             self.start_job_hunt()
 
     def stop_job_hunt(self) -> None:
-        if self._worker and self._worker.isRunning():
+        if self._hunt_worker and self._hunt_worker.isRunning():
             self.add_agent_message("Stopping Job Hunt... (Waiting for current step to finish)")
-            self._worker.requestInterruption()
+            self._hunt_worker.requestInterruption()
             self._toggle_btn.setEnabled(False)
             self._toggle_btn.setText("Stopping...")
 
@@ -746,7 +763,9 @@ class ProcessWorkspace(QWidget):
                 border-radius: 8px; font-size: 16px; font-weight: bold;
             }
         """)
-        self._worker = None
+        if self._hunt_worker:
+            self._hunt_worker.deleteLater()
+            self._hunt_worker = None
 
     def _on_job_imported(self, result: object) -> None:
         if not isinstance(result, ImportedJob):
@@ -790,10 +809,33 @@ class ProcessWorkspace(QWidget):
         if not isinstance(service, BrowserService):
             self._add_notice("Browser capability is not configured correctly.")
             return
-        self._worker = BrowserLaunchWorker(service, job.url)
-        self._worker.completed.connect(lambda: self.add_agent_message("Job opened for your review."))
-        self._worker.failed.connect(self._on_worker_failed)
-        self._worker.start()
+        worker = BrowserLaunchWorker(service, job.url)
+        self._browser_workers.append(worker)
+        worker.completed.connect(lambda: self.add_agent_message("Job opened for your review."))
+        worker.failed.connect(self._on_worker_failed)
+        worker.finished.connect(lambda w=worker: self._cleanup_browser_worker(w))
+        worker.start()
+
+    def cleanup(self) -> None:
+        """Gracefully interrupt and wait for all background workers before shutdown."""
+        if self._hunt_worker and self._hunt_worker.isRunning():
+            self._hunt_worker.requestInterruption()
+            self._hunt_worker.wait(2000)
+            self._hunt_worker = None
+        for w in list(self._doc_workers):
+            if w.isRunning():
+                w.requestInterruption()
+                w.wait(1000)
+        self._doc_workers.clear()
+        for w in list(self._browser_workers):
+            if w.isRunning():
+                w.requestInterruption()
+                w.wait(1000)
+        self._browser_workers.clear()
+        if self._chat_worker and self._chat_worker.isRunning():
+            self._chat_worker.requestInterruption()
+            self._chat_worker.wait(1000)
+            self._chat_worker = None
 
     def _add_notice(self, message: str) -> None:
         label = QLabel(message)

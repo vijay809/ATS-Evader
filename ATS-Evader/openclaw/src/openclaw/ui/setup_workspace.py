@@ -567,10 +567,6 @@ class SetupWorkspace(QWidget):
             self._loader.start_sequence(steps_list)
             task = self._loader._task
             if task is not None:
-                try:
-                    task.all_completed.disconnect(finish_and_refresh)
-                except (RuntimeError, TypeError):
-                    pass
                 task.all_completed.connect(finish_and_refresh)
             
         wrapped_start(steps)

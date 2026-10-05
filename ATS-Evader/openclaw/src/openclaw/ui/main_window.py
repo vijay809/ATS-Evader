@@ -300,7 +300,9 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event: QCloseEvent) -> None:
         self._monitor_thread.requestInterruption()
-        self._monitor_thread.wait()
+        self._monitor_thread.wait(1500)
+        if hasattr(self, "_process"):
+            self._process.cleanup()
         super().closeEvent(event)
 
     async def _on_task_changed(self, event: RuntimeEvent) -> None:
