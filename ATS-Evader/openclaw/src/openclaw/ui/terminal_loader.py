@@ -169,7 +169,6 @@ class TerminalLoaderOverlay(QFrame):
         self._current_pct = 0
         self._prog_pct.setText("0%")
         self._progress.setValue(0)
-        self._schedule_next_jump()
         
         self._task = LoaderTask(steps)
         self._task.step_started.connect(self._on_step_started)
@@ -243,6 +242,10 @@ class TerminalLoaderOverlay(QFrame):
             
         self._append_log(" OK ", f"{name} completed.")
         self._current_step += 1
+        pct = int((self._current_step / max(self._total_steps, 1)) * 100)
+        self._current_pct = min(pct, 99)
+        self._prog_pct.setText(f"{self._current_pct}%")
+        self._progress.setValue(self._current_pct)
 
     def _on_step_failed(self, name: str, error: str) -> None:
         self._dots_timer.stop()
@@ -264,33 +267,6 @@ class TerminalLoaderOverlay(QFrame):
         self._progress.setValue(100)
         self._current_pct = 100
         self._close_btn.show()
-
-    def _schedule_next_jump(self) -> None:
-        if self._current_pct >= 90:
-            return
-        if self._task is None or not self._task.isRunning():
-            return
-        import random
-        # Random interval under 10 seconds (e.g. 1s to 9s)
-        delay_ms = random.randint(1000, 9000)
-        QTimer.singleShot(delay_ms, self._on_progress_jump)
-
-    def _on_progress_jump(self) -> None:
-        if self._current_pct >= 90:
-            return
-        if self._task is None or not self._task.isRunning():
-            return
-        
-        import random
-        # Random percentage jump under 10
-        jump = random.randint(1, 9)
-        self._current_pct += jump
-        if self._current_pct > 90:
-            self._current_pct = 90
-            
-        self._prog_pct.setText(f"{self._current_pct}%")
-        self._progress.setValue(self._current_pct)
-        self._schedule_next_jump()
 
     def resizeEvent(self, event: Any) -> None:
         super().resizeEvent(event)

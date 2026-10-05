@@ -34,11 +34,10 @@ class JobHuntWorker(QThread):
     error = Signal(str)
     finished = Signal()
 
-    def __init__(self, browser_service: BrowserService, ats_analyzer: AtsAnalyzer, navigator: object, active_resume: str, role: str, location: str, min_exp: int, win_x: int = 0, win_y: int = 0, win_w: int = 1280, win_h: int = 800, threshold: int = 50):
+    def __init__(self, browser_service: BrowserService, ats_analyzer: AtsAnalyzer, active_resume: str, role: str, location: str, min_exp: int, win_x: int = 0, win_y: int = 0, win_w: int = 1280, win_h: int = 800, threshold: int = 50):
         super().__init__()
         self.browser = browser_service
         self.analyzer = ats_analyzer
-        self.navigator = navigator
         self.active_resume = active_resume
         self.role = role
         self.location = location
@@ -144,33 +143,13 @@ class JobHuntWorker(QThread):
                     pdf_path = await PdfGenerator.markdown_to_pdf(tailored.tailored_resume, pdf_path)
                     
                     msg1 = f"PDF Generated at: {pdf_path}"
-                    msg2 = "Triggering Autonomous Apply..."
                     self.agent_message.emit(msg1)
                     logger.info(msg1)
-                    self.agent_message.emit(msg2)
-                    logger.info(msg2)
                     
-                    def stream_callback(msg: str):
-                        self.agent_message.emit(msg)
-                        logger.info(f"Agent: {msg}")
-                        
-                    if self.isInterruptionRequested():
-                        self.agent_message.emit("Job Hunt was stopped by the user.")
-                        break
-                        
-                    cmd = "Apply to this job. The tailored resume is ready. If asked to upload, just upload it and consider it uploaded. Then submit."
-                    nav_result = await self.navigator.execute_goal(cmd, max_steps=15, emit_cb=stream_callback, cv_path=pdf_path)
-                    
-                    if nav_result.success:
-                        msg = f"Successfully applied to {jd['title']}!"
-                        self.agent_message.emit(msg)
-                        logger.info(msg)
-                        status = "Applied"
-                    else:
-                        msg = f"Failed to apply to {jd['title']}. Error: {nav_result.error}"
-                        self.agent_message.emit(msg)
-                        logger.error(msg)
-                        status = "Skipped"
+                    status = "Ready to Apply"
+                    msg_ready = f"Match meets threshold ({analysis.match_score}%)! Tailored CV prepared and staged for your review."
+                    self.agent_message.emit(msg_ready)
+                    logger.info(msg_ready)
                 else:
                     msg = f"Skipping '{jd['title']}' - Score {analysis.match_score}% is below {self.threshold}% threshold."
                     self.agent_message.emit(msg)
@@ -514,6 +493,10 @@ class ProcessWorkspace(QWidget):
         approve_btn.setMinimumHeight(40)
         approve_btn.setStyleSheet("background-color: #4b8eff; color: white; border-radius: 6px; font-weight: bold;")
         
+        applied_btn = QPushButton("Mark Applied")
+        applied_btn.setMinimumHeight(40)
+        applied_btn.setStyleSheet("background-color: #2e7d32; color: white; border-radius: 6px; font-weight: bold;")
+
         cover_letter_btn = QPushButton("Write Cover Letter")
         cover_letter_btn.setMinimumHeight(40)
         cover_letter_btn.setStyleSheet("background-color: #5b3a6e; color: white; border-radius: 6px; font-weight: bold;")
@@ -530,13 +513,25 @@ class ProcessWorkspace(QWidget):
                 self._runtime.plugins._context.documents.save_job_description(job)
             card.deleteLater()
             
+        def handle_applied():
+            job = self._runtime.plugins._context.documents.get_job_description(job_id)
+            if job:
+                job.status = "Applied"
+                self._runtime.plugins._context.documents.save_job_description(job)
+            applied_btn.setEnabled(False)
+            applied_btn.setText("✓ Applied")
+            applied_btn.setStyleSheet("background-color: #1b5e20; color: #a5d6a7; border-radius: 6px; font-weight: bold;")
+            self.add_agent_message(f"Marked '{title}' at {company} as Applied.")
+
         approve_btn.clicked.connect(lambda: self._open_for_review(job_id))
+        applied_btn.clicked.connect(handle_applied)
         skip_btn.clicked.connect(handle_skip)
         
         cover_letter_btn.clicked.connect(lambda: self._generate_document("cover_letter", job_id))
         tailor_cv_btn.clicked.connect(lambda: self._generate_document("tailor_cv", job_id))
         
         actions_layout.addWidget(approve_btn)
+        actions_layout.addWidget(applied_btn)
         actions_layout.addWidget(cover_letter_btn)
         actions_layout.addWidget(tailor_cv_btn)
         actions_layout.addWidget(skip_btn)
@@ -589,7 +584,6 @@ class ProcessWorkspace(QWidget):
             
             browser = self._runtime.services.get(BROWSER_SERVICE)
             analyzer = self._runtime.services.get(ATS_ANALYZER_SERVICE)
-            navigator = self._runtime.services.get("browser.navigator")
             
             if not isinstance(browser, BrowserService) or not isinstance(analyzer, AtsAnalyzer):
                 self._add_notice("Browser or ATS capability is not configured correctly.")
@@ -619,7 +613,7 @@ class ProcessWorkspace(QWidget):
             
             threshold = self._threshold_slider.value()
             self._worker = JobHuntWorker(
-                browser, analyzer, navigator, active_resume.raw_content, role, location, min_exp,
+                browser, analyzer, active_resume.raw_content, role, location, min_exp,
                 win_x=avail_geo.x() + w, win_y=y_pos, win_w=w, win_h=h, threshold=threshold
             )
             self._worker.agent_message.connect(self.add_agent_message)

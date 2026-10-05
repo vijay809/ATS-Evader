@@ -3,6 +3,11 @@ __pycache__/
 .mypy_cache/
 .ruff_cache/
 .venv/
+.uv-cache/
+.uv-cache-local/
 *.py[cod]
 *.db
 *.sqlite
+outputs/
+*.html
+*.pdf

@@ -60,7 +60,7 @@ class JobPipelineWorkspace(QWidget):
         self._kanban_layout = QHBoxLayout()
         self.columns = {}
         
-        for col_name in ["Analyzed", "Applying", "Applied", "Skipped"]:
+        for col_name in ["Analyzed", "Ready to Apply", "Applied", "Skipped"]:
             col_widget = QWidget()
             col_widget.setStyleSheet("background-color: #1a1a1a; border-radius: 8px; border: 1px solid #333;")
             col_layout = QVBoxLayout(col_widget)
@@ -125,6 +125,8 @@ class JobPipelineWorkspace(QWidget):
                 
                 # Determine target column
                 status = job.status
+                if status == "Applying":
+                    status = "Ready to Apply"
                 if status not in self.columns:
                     # Map unknown statuses to Analyzed or Skipped
                     status = "Analyzed"
@@ -157,21 +159,26 @@ class JobPipelineWorkspace(QWidget):
                     action_layout.addWidget(open_btn)
                 
                 if status == "Analyzed":
-                    apply_btn = QPushButton("Apply")
-                    apply_btn.setStyleSheet("background-color: #4b8eff; color: white; border-radius: 4px; padding: 4px;")
-                    apply_btn.clicked.connect(lambda checked=False, j=job: self._move_job(j, "Applying"))
-                    action_layout.addWidget(apply_btn)
+                    stage_btn = QPushButton("Stage to Apply")
+                    stage_btn.setStyleSheet("background-color: #4b8eff; color: white; border-radius: 4px; padding: 4px;")
+                    stage_btn.clicked.connect(lambda checked=False, j=job: self._move_job(j, "Ready to Apply"))
+                    action_layout.addWidget(stage_btn)
                     
                     skip_btn = QPushButton("Skip")
                     skip_btn.setStyleSheet("background-color: #555; color: white; border-radius: 4px; padding: 4px;")
                     skip_btn.clicked.connect(lambda checked=False, j=job: self._move_job(j, "Skipped"))
                     action_layout.addWidget(skip_btn)
                     
-                elif status == "Applying":
+                elif status == "Ready to Apply":
                     done_btn = QPushButton("Mark Applied")
                     done_btn.setStyleSheet("background-color: #3b5a4b; color: white; border-radius: 4px; padding: 4px;")
                     done_btn.clicked.connect(lambda checked=False, j=job: self._move_job(j, "Applied"))
                     action_layout.addWidget(done_btn)
+
+                    skip_btn = QPushButton("Skip")
+                    skip_btn.setStyleSheet("background-color: #555; color: white; border-radius: 4px; padding: 4px;")
+                    skip_btn.clicked.connect(lambda checked=False, j=job: self._move_job(j, "Skipped"))
+                    action_layout.addWidget(skip_btn)
                 
                 if action_layout.count() > 0:
                     card_layout.addLayout(action_layout)
