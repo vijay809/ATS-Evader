@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -16,12 +17,152 @@ logger = logging.getLogger(__name__)
 ATS_ANALYZER_SERVICE = "ats.analyzer"
 
 
+def clean_favoring_points(raw_items: list[str]) -> list[str]:
+    """Extracts concise, purely positive alignment points with zero negative caveats."""
+    negative_patterns = [
+        r"\bhowever\b",
+        r"\bcritical gaps?\b",
+        r"\bmajor blocker\b",
+        r"\blacks?\b",
+        r"\blacking\b",
+        r"\bmissing\b",
+        r"\bdoes not (?:have|possess|substantiate|contain|explicitly)\b",
+        r"\bno explicit\b",
+        r"\bmust explicitly\b",
+        r"\bnot found\b",
+        r"\bunsupported\b",
+        r"\bto be considered a strong match\b",
+        r"\brequires\b",
+        r"\bgap\b",
+    ]
+
+    cleaned: list[str] = []
+
+    for raw in raw_items:
+        if not raw or not raw.strip():
+            continue
+        # Split into individual sentences
+        sentences = re.split(r"(?<=[.!?])\s+", raw.strip())
+        for s in sentences:
+            s = s.strip()
+            if not s:
+                continue
+
+            # If sentence has a contrast conjunction like "but lacks", take only the positive leading clause
+            contrast_match = re.search(
+                r"^(.*?)(?:\s*,\s*|\s+)(?:but\s+lacks?\b|however\b|although\s+lacking\b|yet\s+lacks?\b|while\s+lacking\b)",
+                s,
+                re.IGNORECASE,
+            )
+            if contrast_match:
+                s = contrast_match.group(1).strip()
+
+            # Check if this sentence contains any negative words or requirement caveats
+            if any(re.search(pat, s, re.IGNORECASE) for pat in negative_patterns):
+                continue
+
+            # Strip conditional qualifiers like "If the role is flexible,"
+            s = re.sub(r"^(?:if the role is flexible,\s*)", "", s, flags=re.IGNORECASE)
+
+            # Strip common boilerplate lead-ins
+            s = re.sub(
+                r"^(?:the\s+)?candidate(?:'s)?\s+(?:is\s+a\s+highly\s+experienced\s+[^,]+with\s+|has\s+|is\s+a\s+|is\s+|possesses\s+)?",
+                "",
+                s,
+                flags=re.IGNORECASE,
+            )
+            s = re.sub(r"^(?:the\s+)?seniority\s+and\s+", "", s, flags=re.IGNORECASE)
+
+            # Strip trailing repetitive filler like "to the ... component"
+            s = s.rstrip(".").strip()
+            s = re.sub(r"\s+to the [a-zA-Z0-9/\s]+ component$", "", s, flags=re.IGNORECASE)
+
+            # Check for compound sentence with "including demonstrable experience with" / "including experience with"
+            inc_match = re.search(r"^(.*?),\s*including\s+(?:demonstrable\s+)?experience\s+with\s+(.*)$", s, re.IGNORECASE)
+            if inc_match:
+                part1 = inc_match.group(1).strip()
+                part2 = "Experience with " + inc_match.group(2).strip()
+                for p in [part1, part2]:
+                    p = p.rstrip(".").strip()
+                    if len(p) > 10:
+                        cleaned.append(p[0].upper() + p[1:])
+                continue
+
+            if len(s) > 10:
+                cleaned.append(s[0].upper() + s[1:])
+
+    # Deduplicate while preserving order
+    seen: set[str] = set()
+    unique_items: list[str] = []
+    for item in cleaned:
+        key = item.lower()
+        if key not in seen:
+            seen.add(key)
+            unique_items.append(item)
+
+    return unique_items
+
+
+def club_missing_skills(skills: list[str]) -> list[str]:
+    """Clubs missing skills by technology families or comma-separates them into compact lines."""
+    if not skills:
+        return []
+
+    # Flatten any comma-separated inputs first
+    flat_skills: list[str] = []
+    for s in skills:
+        if not s:
+            continue
+        # Split by comma if not inside parentheses
+        parts = re.split(r",\s*(?![^()]*\))", s.strip())
+        for p in parts:
+            p_clean = p.strip()
+            if p_clean and p_clean not in flat_skills:
+                flat_skills.append(p_clean)
+
+    # Defined technology clusters
+    clusters: list[tuple[str, list[str]]] = [
+        (".NET & Microsoft", [r"(?:\.net|c#|asp\.net|blazor|wpf|entity framework|\bef\b)"]),
+        ("Cloud & Infra", [r"(?:azure|aws|gcp|cloud|terraform|lambda|cloudformation)"]),
+        ("Databases & Caching", [r"(?:sql|postgres|mysql|cosmos|redis|mongodb|oracle|cassandra|dynamodb)"]),
+        ("Containers & DevOps", [r"(?:docker|kubernetes|k8s|helm|jenkins|ci/cd|ansible|terraform|argocd)"]),
+        ("Frontend & UI", [r"(?:react|angular|vue|typescript|javascript|next\.js|html|css|tailwind|svelte)"]),
+        ("Backend & Languages", [r"(?:python|java|golang|\bgo\b|rust|c\+\+|node|express|fastapi|django|flask|spring)"]),
+        ("Messaging & Streaming", [r"(?:kafka|rabbitmq|activemq|sqs|event grid|service bus)"]),
+        ("AI / ML", [r"(?:langchain|llm|pytorch|tensorflow|openai|nlp|rag|huggingface)"]),
+    ]
+
+    used: set[str] = set()
+    grouped_result: list[str] = []
+
+    for cluster_name, patterns in clusters:
+        cluster_items: list[str] = []
+        for s in flat_skills:
+            if s in used:
+                continue
+            if any(re.search(pat, s, re.IGNORECASE) for pat in patterns):
+                cluster_items.append(s)
+                used.add(s)
+        if cluster_items:
+            grouped_result.append(", ".join(cluster_items))
+
+    # Remaining skills that did not match any cluster
+    remaining = [s for s in flat_skills if s not in used]
+    # Chunk remaining in groups of 2-3
+    for i in range(0, len(remaining), 3):
+        chunk = remaining[i : i + 3]
+        grouped_result.append(", ".join(chunk))
+
+    return grouped_result
+
+
 class AtsAnalysis(BaseModel):
     match_score: int = Field(ge=0, le=100)
     matched_keywords: list[str]
     missing_keywords: list[str]
     recommendations: list[str]
     summary: str
+    favoring_points: list[str] = Field(default_factory=list)
     unsupported_details: list[str] = Field(default_factory=list)
     missing_core_skills: list[str] = Field(default_factory=list)
     formatting_risks: list[str] = Field(default_factory=list)
@@ -157,7 +298,8 @@ EVALUATION WEIGHTS:
 4. Education, Certifications & Credentials (10%).
 
 GAP & FLAG AUDIT DIRECTIVES:
-- missing_core_skills: Hard technical skills, frameworks, languages, or tools strictly required in the JD that the candidate does not appear to have in the resume (e.g. ['Blazor', 'C#', '.NET Core']).
+- favoring_points: 3 to 5 concise bullet points highlighting strong candidate alignment, matching qualifications, or relevant experience. MUST BE PURELY POSITIVE (NO negative caveats, NO "however", NO mentions of lacking skills or blockers). Communicate concisely with fewer words (e.g. ["Strong proficiency in modern frontend and Python backend", "Experience with Generative AI via LangChain", "Functional domain (Enterprise Systems) aligns well"]).
+- missing_core_skills: Hard technical skills, frameworks, languages, or tools strictly required in the JD that the candidate does not appear to have in the resume. Group closely related technologies into comma-separated items or clubbed categories (e.g. [".NET, C#, ASP.NET Core", "SQL Server, Cosmos DB, Redis", "Docker, Kubernetes"]).
 - unsupported_details: Qualifications, domain specializations, years of experience, or responsibilities demanded by the JD that the candidate's resume cannot substantiate or verify (e.g. ['Requires 5+ years in Healthcare domain', 'Requires cloud microservice ownership']).
 - formatting_risks: Potential ATS parsing vulnerabilities, missing standard skill synonyms/acronyms, or structural formatting risks that might cause automated rejection.
 
@@ -166,6 +308,7 @@ Return ONLY valid JSON with this exact schema:
   "match_score": integer from 0 to 100,
   "matched_keywords": [string],
   "missing_keywords": [string],
+  "favoring_points": [string],
   "missing_core_skills": [string],
   "unsupported_details": [string],
   "formatting_risks": [string],
@@ -319,7 +462,14 @@ Respond ONLY with valid JSON matching this schema:
     @staticmethod
     def _parse_analysis(response: str) -> AtsAnalysis:
         try:
-            return AtsAnalysis.model_validate(AtsAnalyzer._parse_json(response))
+            data = AtsAnalyzer._parse_json(response)
+            if isinstance(data, dict):
+                fav = data.get("favoring_points")
+                if fav and isinstance(fav, list):
+                    data["favoring_points"] = clean_favoring_points(fav)
+                elif "summary" in data:
+                    data["favoring_points"] = clean_favoring_points([data["summary"], *data.get("recommendations", [])])
+            return AtsAnalysis.model_validate(data)
         except ValueError as error:
             raise AtsAnalysisError("The local model returned an invalid ATS analysis") from error
 

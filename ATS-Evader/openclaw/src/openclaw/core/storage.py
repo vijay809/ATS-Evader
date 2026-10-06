@@ -10,7 +10,7 @@ from collections.abc import Iterable
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
-from sqlmodel import Field, Session, SQLModel, create_engine, desc, select
+from sqlmodel import Field, Session, SQLModel, create_engine, desc, func, select
 
 if TYPE_CHECKING:
     from openclaw.core.documents import (
@@ -52,6 +52,7 @@ class PreferenceRecord(SQLModel, table=True):
 
 class JobDescriptionRecord(SQLModel, table=True):
     id: str = Field(primary_key=True)
+    serial_no: int | None = Field(default=None, index=True)
     name: str
     content: str
     status: str = "Discovered"
@@ -103,6 +104,7 @@ class DocumentRepository(Protocol):
     def list_resumes(self) -> Iterable[Resume]: ...
     def list_job_descriptions(self) -> Iterable[JobDescription]: ...
     def get_latest_analysis(self, job_id: str) -> AnalysisResult | None: ...
+    def get_next_serial_no(self) -> int: ...
 
 
 class SQLiteTaskRepository:
@@ -147,6 +149,16 @@ class SQLiteDocumentRepository:
     def __init__(self, database_path: Path) -> None:
         self._engine = create_engine(f"sqlite:///{database_path}")
         SQLModel.metadata.create_all(self._engine)
+        with self._engine.begin() as conn:
+            import sqlalchemy as sa
+            try:
+                conn.execute(sa.text("ALTER TABLE jobdescriptionrecord ADD COLUMN serial_no INTEGER"))
+            except Exception:
+                pass
+            try:
+                conn.execute(sa.text("UPDATE jobdescriptionrecord SET serial_no = rowid WHERE serial_no IS NULL"))
+            except Exception:
+                pass
 
     def save_resume(self, resume: Resume) -> None:
         record = ResumeRecord(id=str(resume.id), name=resume.name, content=resume.content)
@@ -170,8 +182,21 @@ class SQLiteDocumentRepository:
             session.commit()
 
     def save_job_description(self, jd: JobDescription) -> None:
-        record = JobDescriptionRecord(id=str(jd.id), name=jd.name, content=jd.content, status=jd.status, url=jd.url)
         with Session(self._engine) as session:
+            if jd.serial_no is None:
+                max_serial = session.exec(select(func.max(JobDescriptionRecord.serial_no))).one_or_none()
+                if max_serial is None:
+                    max_serial = session.exec(select(func.count(JobDescriptionRecord.id))).one_or_none() or 0
+                jd.serial_no = (max_serial or 0) + 1
+
+            record = JobDescriptionRecord(
+                id=str(jd.id),
+                serial_no=jd.serial_no,
+                name=jd.name,
+                content=jd.content,
+                status=jd.status,
+                url=jd.url,
+            )
             session.merge(record)
             session.commit()
 
@@ -270,8 +295,25 @@ class SQLiteDocumentRepository:
         with Session(self._engine) as session:
             record = session.get(JobDescriptionRecord, jd_id)
             if not record:
+                clean_id = jd_id.split("_")[-1] if "_" in jd_id else jd_id
+                if clean_id.isdigit():
+                    record = session.exec(
+                        select(JobDescriptionRecord).where(JobDescriptionRecord.serial_no == int(clean_id))
+                    ).first()
+            if not record:
                 return None
-            return JobDescription(id=UUID(record.id), name=record.name, content=record.content, status=record.status, url=record.url)
+            try:
+                rec_id = UUID(record.id)
+            except ValueError:
+                rec_id = record.id
+            return JobDescription(
+                id=rec_id,
+                serial_no=record.serial_no,
+                name=record.name,
+                content=record.content,
+                status=record.status,
+                url=record.url,
+            )
 
     def list_resumes(self) -> Iterable[Resume]:
         from uuid import UUID
@@ -286,8 +328,32 @@ class SQLiteDocumentRepository:
 
         from openclaw.core.documents import JobDescription
         with Session(self._engine) as session:
-            records = session.exec(select(JobDescriptionRecord)).all()
-        return tuple(JobDescription(id=UUID(record.id), name=record.name, content=record.content, status=record.status, url=record.url) for record in records)
+            records = session.exec(select(JobDescriptionRecord).order_by(JobDescriptionRecord.serial_no)).all()
+        result = []
+        for record in records:
+            try:
+                rec_id = UUID(record.id)
+            except ValueError:
+                rec_id = record.id
+            result.append(
+                JobDescription(
+                    id=rec_id,
+                    serial_no=record.serial_no,
+                    name=record.name,
+                    content=record.content,
+                    status=record.status,
+                    url=record.url,
+                )
+            )
+        return tuple(result)
+
+    def get_next_serial_no(self) -> int:
+        with Session(self._engine) as session:
+            max_serial = session.exec(select(func.max(JobDescriptionRecord.serial_no))).one_or_none()
+            if max_serial is None:
+                count = session.exec(select(func.count(JobDescriptionRecord.id))).one_or_none() or 0
+                return count + 1
+            return max_serial + 1
 
     def get_latest_analysis(self, job_id: str) -> AnalysisResult | None:
         from uuid import UUID

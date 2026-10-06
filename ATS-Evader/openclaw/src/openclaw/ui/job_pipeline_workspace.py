@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, QThread
+import os
+from PySide6.QtCore import Qt, QThread, QUrl
+from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
     QComboBox,
     QHBoxLayout,
@@ -216,25 +218,63 @@ class JobPipelineWorkspace(QWidget):
                 title_lbl.setStyleSheet("font-weight: 700; color: #141c29; font-size: 13px; border: none;")
                 title_lbl.setWordWrap(True)
                 
-                info_row = QHBoxLayout()
+                s_no = getattr(job, "serial_no", None) or 1
+                portal = "Naukri"
+                if job.url:
+                    u = job.url.lower()
+                    if "naukri.com" in u:
+                        portal = "Naukri"
+                    elif "linkedin.com" in u:
+                        portal = "LinkedIn"
+                    elif "indeed.com" in u:
+                        portal = "Indeed"
+                    elif "glassdoor.com" in u:
+                        portal = "Glassdoor"
+                    elif "foundit" in u or "monster" in u:
+                        portal = "Foundit"
+                    else:
+                        portal = "Portal"
+                portal_id = f"{portal}_{s_no}"
+
+                sub_row = QHBoxLayout()
+                sub_row.setSpacing(6)
                 comp_lbl = QLabel(company)
-                comp_lbl.setStyleSheet("color: #5c6479; font-size: 12px; font-weight: 500; border: none;")
-                
-                score_lbl = QLabel(f"Score: {score_str}")
-                score_lbl.setStyleSheet("""
-                    background-color: #fff0e8;
-                    color: #c25e36;
-                    font-size: 11px;
+                comp_lbl.setStyleSheet("color: #5c6479; font-size: 11px; font-weight: 600; border: none;")
+                sub_row.addWidget(comp_lbl)
+
+                dot_lbl = QLabel("•")
+                dot_lbl.setStyleSheet("color: #8f96a8; font-size: 9px; border: none;")
+                sub_row.addWidget(dot_lbl)
+
+                id_badge = QLabel(f"ID #{portal_id}")
+                id_badge.setStyleSheet("""
+                    background-color: #f4f2fb;
+                    color: #5e5298;
+                    font-size: 9px;
+                    font-family: 'JetBrains Mono', Consolas, monospace;
                     font-weight: 700;
-                    padding: 2px 6px;
+                    padding: 1px 6px;
                     border-radius: 6px;
-                    border: 1px solid rgba(194, 94, 54, 0.2);
+                    border: 1px solid rgba(139, 126, 200, 0.25);
                 """)
-                info_row.addWidget(comp_lbl, 1)
-                info_row.addWidget(score_lbl, 0)
-                
+                sub_row.addWidget(id_badge)
+                sub_row.addStretch()
+
+                score_lbl = QLabel(f"{score_str} Match" if score_str != "N/A" else "Unscored")
+                score_lbl.setStyleSheet("""
+                    background-color: #e1f5ef;
+                    color: #186a59;
+                    font-size: 10px;
+                    font-weight: 700;
+                    font-family: 'JetBrains Mono', Consolas, monospace;
+                    padding: 2px 7px;
+                    border-radius: 8px;
+                    border: 1px solid rgba(24, 106, 89, 0.2);
+                """)
+                sub_row.addWidget(score_lbl)
+
                 card_layout.addWidget(title_lbl)
-                card_layout.addLayout(info_row)
+                card_layout.addLayout(sub_row)
                 
                 # Actions based on status
                 action_layout = QHBoxLayout()
@@ -258,6 +298,26 @@ class JobPipelineWorkspace(QWidget):
                     """)
                     open_btn.clicked.connect(lambda checked=False, u=job.url: self._open_url(u))
                     action_layout.addWidget(open_btn)
+
+                cv_file = os.path.join(os.getcwd(), "outputs", "resumes", f"Vijay_Srivastava_FullStack_{s_no}.pdf")
+                if os.path.exists(cv_file):
+                    open_cv_btn = QPushButton("Open CV")
+                    open_cv_btn.setStyleSheet("""
+                        QPushButton {
+                            background-color: #f4f2fb;
+                            color: #5e5298;
+                            border: 1px solid rgba(94, 82, 152, 0.25);
+                            border-radius: 6px;
+                            padding: 4px 8px;
+                            font-size: 11px;
+                            font-weight: 600;
+                        }
+                        QPushButton:hover {
+                            background-color: #ddd7f3;
+                        }
+                    """)
+                    open_cv_btn.clicked.connect(lambda checked=False, p=cv_file: QDesktopServices.openUrl(QUrl.fromLocalFile(p)))
+                    action_layout.addWidget(open_cv_btn)
                 
                 if status == "Analyzed":
                     stage_btn = QPushButton("Stage to Apply")

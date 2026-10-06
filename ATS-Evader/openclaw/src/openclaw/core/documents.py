@@ -36,7 +36,8 @@ class JobDescription:
     name: str = "Imported JD"
     status: str = "Discovered"
     url: str | None = None
-    id: UUID = field(default_factory=uuid4)
+    serial_no: int | None = None
+    id: UUID | str = field(default_factory=uuid4)
 
 
 @dataclass(slots=True)

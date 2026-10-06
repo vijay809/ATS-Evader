@@ -108,3 +108,55 @@ async def test_ats_analysis_fails_after_max_retries() -> None:
         await analyzer.analyze("Resume", "Job description")
     
     assert client.calls == 3
+
+
+def test_clean_favoring_points_filters_negatives_and_condenses() -> None:
+    from openclaw.plugins.ats import clean_favoring_points
+
+    raw = [
+        "The candidate is a highly experienced Senior Software Engineer with strong proficiency in modern frontend and Python-based backend development, including demonstrable experience with Generative AI via LangChain. The seniority and functional domain (Enterprise Systems) align well. However, the resume presents critical gaps in the core technical requirements, specifically lacking proficiency in .NET/C# and hands-on experience with the required Azure cloud ecosystem and specific database technologies (SQL Server, Cosmos DB, Redis). The lack of C#/.NET experience is a major blocker for this role.",
+        "The candidate is a strong functional fit (Enterprise, Seniority, AI/LLM concepts) but lacks the core required technology stack (.NET/C# and Azure).",
+        "If the role is flexible, the candidate's Python/LangChain experience is highly relevant to the AI component.",
+        "The candidate must explicitly detail experience with C#/.NET and Azure services to be considered a strong match for this specific JD.",
+    ]
+
+    points = clean_favoring_points(raw)
+
+    # Must contain positive points
+    assert any("modern frontend and Python-based backend development" in p for p in points)
+    assert any("Generative AI via LangChain" in p for p in points)
+    assert any("Enterprise Systems" in p for p in points)
+    assert any("functional fit" in p for p in points)
+    assert any("Python/LangChain experience is highly relevant" in p for p in points)
+
+    # Must NOT contain any negative phrases or blocker caveats
+    for p in points:
+        assert "however" not in p.lower()
+        assert "critical gaps" not in p.lower()
+        assert "major blocker" not in p.lower()
+        assert "lacks" not in p.lower()
+        assert "must explicitly" not in p.lower()
+
+
+def test_club_missing_skills_clusters_and_comma_separates() -> None:
+    from openclaw.plugins.ats import club_missing_skills
+
+    raw_skills = [
+        ".NET",
+        "C#",
+        "ASP.NET Core",
+        "Azure Cloud Services (Azure OpenAI, AKS, Azure Functions)",
+        "SQL Server",
+        "Cosmos DB",
+        "Redis",
+        "Docker",
+        "Kubernetes",
+    ]
+
+    clubbed = club_missing_skills(raw_skills)
+    assert len(clubbed) == 4
+    assert ".NET, C#, ASP.NET Core" in clubbed
+    assert "Azure Cloud Services (Azure OpenAI, AKS, Azure Functions)" in clubbed
+    assert "SQL Server, Cosmos DB, Redis" in clubbed
+    assert "Docker, Kubernetes" in clubbed
+

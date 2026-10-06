@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import re
 from typing import TYPE_CHECKING
 
 from PySide6.QtCore import Qt, QThread, QUrl, Signal
@@ -24,12 +25,34 @@ from PySide6.QtWidgets import (
 )
 
 from openclaw.core.documents import JobDescription
-from openclaw.plugins.ats import ATS_ANALYZER_SERVICE, AtsAnalyzer
+from openclaw.plugins.ats import (
+    ATS_ANALYZER_SERVICE,
+    AtsAnalyzer,
+    clean_favoring_points,
+    club_missing_skills,
+)
 from openclaw.plugins.browser import BROWSER_SERVICE, BrowserService
 
 if TYPE_CHECKING:
     from openclaw.core.runtime import Runtime
     from openclaw.plugins.semantic_navigator import SemanticNavigator
+
+
+def extract_portal_name(url: str | None) -> str:
+    if not url:
+        return "Naukri"
+    u = url.lower()
+    if "naukri.com" in u:
+        return "Naukri"
+    elif "linkedin.com" in u:
+        return "LinkedIn"
+    elif "indeed.com" in u:
+        return "Indeed"
+    elif "glassdoor.com" in u:
+        return "Glassdoor"
+    elif "foundit" in u or "monster" in u:
+        return "Foundit"
+    return "Portal"
 
 
 class JobHuntWorker(QThread):
@@ -38,12 +61,13 @@ class JobHuntWorker(QThread):
     agent_message = Signal(str)
     error = Signal(str)
 
-    def __init__(self, browser_service: BrowserService, ats_analyzer: AtsAnalyzer, active_resume: str, role: str, location: str, min_exp: int, win_x: int = 0, win_y: int = 0, win_w: int = 1280, win_h: int = 800, threshold: int = 50):
+    def __init__(self, browser_service: BrowserService, ats_analyzer: AtsAnalyzer, active_resume: str, role: str, location: str, min_exp: int, win_x: int = 0, win_y: int = 0, win_w: int = 1280, win_h: int = 800, threshold: int = 50, documents_repo=None):
         super().__init__()
         self.setObjectName("JobHuntWorker")
         self.browser = browser_service
         self.analyzer = ats_analyzer
         self.active_resume = active_resume
+        self.documents_repo = documents_repo
         self.role = role
         self.location = location
         self.min_exp = min_exp
@@ -216,8 +240,13 @@ class JobHuntWorker(QThread):
                     continue
                 
                 unsupported = list(analysis.unsupported_details)
-                missing_skills = list(analysis.missing_core_skills)
+                missing_skills = club_missing_skills(list(analysis.missing_core_skills))
                 formatting = list(analysis.formatting_risks)
+                fav_points = list(getattr(analysis, "favoring_points", []))
+                if not fav_points:
+                    fav_points = clean_favoring_points([analysis.summary, *analysis.recommendations[:3]])
+                else:
+                    fav_points = clean_favoring_points(fav_points)
                 
                 status = "Analyzed"
                 job_pdf_path: str | None = None
@@ -258,11 +287,21 @@ class JobHuntWorker(QThread):
                         self.agent_message.emit(msg)
                         logger.info(msg)
                         
-                        import uuid
+                        serial_no = 1
+                        if self.documents_repo and hasattr(self.documents_repo, "get_next_serial_no"):
+                            try:
+                                serial_no = self.documents_repo.get_next_serial_no()
+                            except Exception:
+                                serial_no = i + 1
+                        else:
+                            serial_no = i + 1
+
                         from openclaw.core.pdf_gen import PdfGenerator
                         
-                        job_id = str(uuid.uuid4())
-                        pdf_path = os.path.join(os.getcwd(), "outputs", "resumes", f"cv_{job_id[:8]}.pdf")
+                        pdf_filename = f"Vijay_Srivastava_FullStack_{serial_no}.pdf"
+                        out_dir = os.path.join(os.getcwd(), "outputs", "resumes")
+                        os.makedirs(out_dir, exist_ok=True)
+                        pdf_path = os.path.join(out_dir, pdf_filename)
                         pdf_path = await PdfGenerator.markdown_to_pdf(tailored.tailored_resume, pdf_path)
                         job_pdf_path = pdf_path
                         
@@ -306,9 +345,11 @@ class JobHuntWorker(QThread):
                     analysis.recommendations,
                     status=status,
                     pdf_path=job_pdf_path,
+                    serial_no=serial_no,
                     unsupported_details=unsupported,
                     missing_core_skills=missing_skills,
                     formatting_risks=formatting,
+                    favoring_points=fav_points,
                 )
                 self.job_found.emit(job)
 
@@ -380,6 +421,7 @@ class DocumentGeneratorWorker(QThread):
         doc_type: str,
         candidate_name: str = "Applicant",
         company_name: str = "Hiring Team",
+        serial_no: int | str = 1,
     ) -> None:
         super().__init__()
         self.setObjectName("DocumentGeneratorWorker")
@@ -389,12 +431,12 @@ class DocumentGeneratorWorker(QThread):
         self.doc_type = doc_type
         self.candidate_name = candidate_name
         self.company_name = company_name
+        self.serial_no = serial_no
 
     def run(self) -> None:
         try:
             import asyncio
             import os
-            import uuid
 
             from openclaw.core.pdf_gen import PdfGenerator
 
@@ -402,10 +444,9 @@ class DocumentGeneratorWorker(QThread):
                 self.agent_message.emit("Drafting an executive cover letter based on your master resume and the job description...")
                 result = self.analyzer.generate_cover_letter(self.active_resume, self.job_description)
 
-                doc_id = str(uuid.uuid4())[:8]
                 out_dir = os.path.join(os.getcwd(), "outputs", "cover_letters")
                 os.makedirs(out_dir, exist_ok=True)
-                pdf_path = os.path.join(out_dir, f"cover_letter_{doc_id}.pdf")
+                pdf_path = os.path.join(out_dir, f"Vijay_Srivastava_FullStack_Cover_{self.serial_no}.pdf")
 
                 asyncio.run(PdfGenerator.cover_letter_to_pdf(
                     result.cover_letter,
@@ -424,10 +465,9 @@ class DocumentGeneratorWorker(QThread):
                 self.agent_message.emit("Rewriting and optimizing your CV to match the job description's keywords...")
                 tailor_result = self.analyzer.tailor_resume(self.active_resume, self.job_description)
 
-                doc_id = str(uuid.uuid4())[:8]
                 out_dir = os.path.join(os.getcwd(), "outputs", "resumes")
                 os.makedirs(out_dir, exist_ok=True)
-                pdf_path = os.path.join(out_dir, f"cv_{doc_id}.pdf")
+                pdf_path = os.path.join(out_dir, f"Vijay_Srivastava_FullStack_{self.serial_no}.pdf")
 
                 asyncio.run(PdfGenerator.markdown_to_pdf(tailor_result.tailored_resume, pdf_path))
 
@@ -495,6 +535,7 @@ class ProcessWorkspace(QWidget):
         self._doc_workers: list[DocumentGeneratorWorker] = []
         self._browser_workers: list[BrowserLaunchWorker] = []
         self._chat_worker: AiChatWorker | None = None
+        self._job_cards: dict[str, QFrame] = {}
 
         main_layout = QHBoxLayout(self)
         main_layout.setContentsMargins(0, 0, 0, 0)
@@ -1166,289 +1207,451 @@ class ProcessWorkspace(QWidget):
         analysis: list[str],
         job_id: str,
         pdf_path: str | None = None,
+        serial_no: int | None = None,
         unsupported_details: list[str] | None = None,
         missing_core_skills: list[str] | None = None,
         formatting_risks: list[str] | None = None,
     ) -> None:
-        """Adds a job match card to the feed."""
+        """Adds a compact, structured job match card to the feed."""
+        analysis = clean_favoring_points(analysis or [])
+        missing_core_skills = club_missing_skills(missing_core_skills or [])
+
         card = QFrame()
         card.setStyleSheet("""
             QFrame {
                 background-color: #ffffff;
                 border: 1px solid rgba(139, 126, 200, 0.22);
-                border-radius: 14px;
-                padding: 16px;
+                border-radius: 12px;
             }
         """)
+        job_record = self._runtime.plugins._context.documents.get_job_description(job_id)
+        s_no = serial_no or (job_record.serial_no if job_record else None) or 1
+        portal = extract_portal_name(job_record.url if job_record else None)
+        portal_id = f"{portal}_{s_no}"
+
+        expected_cv = os.path.join(os.getcwd(), "outputs", "resumes", f"Vijay_Srivastava_FullStack_{s_no}.pdf")
+        if not pdf_path and os.path.exists(expected_cv):
+            pdf_path = expected_cv
+        card._job_id = job_id
+        card._serial_no = s_no
+        card._cv_pdf_path = pdf_path if (pdf_path and os.path.exists(pdf_path)) else None
+
+        expected_cover = os.path.join(os.getcwd(), "outputs", "cover_letters", f"Vijay_Srivastava_FullStack_Cover_{s_no}.pdf")
+        card._cover_pdf_path = expected_cover if os.path.exists(expected_cover) else None
+        self._job_cards[job_id] = card
+
         layout = QVBoxLayout(card)
-        layout.setSpacing(10)
-        layout.setContentsMargins(14, 14, 14, 14)
-        
-        # Header
+        layout.setContentsMargins(10, 8, 10, 8)
+        layout.setSpacing(5)
+
+        # 1. Header (Title, Company, ID Badge, Match Score Pill)
         header_layout = QHBoxLayout()
-        header_layout.setSpacing(12)
-        
+        header_layout.setSpacing(8)
+        header_layout.setContentsMargins(0, 0, 0, 0)
+
         title_box = QVBoxLayout()
-        title_box.setSpacing(2)
+        title_box.setSpacing(1)
+
         title_lbl = QLabel(title)
         title_lbl.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         title_lbl.setWordWrap(True)
-        title_lbl.setStyleSheet("font-size: 16px; font-weight: 700; color: #141c29; border: none;")
-        
-        company_lbl = QLabel(company)
-        company_lbl.setStyleSheet("font-size: 13px; font-weight: 600; color: #5c6479; border: none;")
+        title_lbl.setStyleSheet("font-size: 14px; font-weight: 700; color: #141c29; border: none; background: transparent;")
         title_box.addWidget(title_lbl)
-        title_box.addWidget(company_lbl)
-        
+
+        sub_row = QHBoxLayout()
+        sub_row.setSpacing(6)
+        sub_row.setContentsMargins(0, 0, 0, 0)
+
+        company_lbl = QLabel(company)
+        company_lbl.setStyleSheet("font-size: 11px; font-weight: 600; color: #5c6479; border: none; background: transparent;")
+        sub_row.addWidget(company_lbl)
+
+        dot_lbl = QLabel("•")
+        dot_lbl.setStyleSheet("color: #8f96a8; font-size: 9px; border: none; background: transparent;")
+        sub_row.addWidget(dot_lbl)
+
+        id_badge = QLabel(f"ID #{portal_id}")
+        id_badge.setStyleSheet("""
+            background-color: #f4f2fb;
+            color: #5e5298;
+            font-size: 9px;
+            font-family: 'JetBrains Mono', Consolas, monospace;
+            font-weight: 700;
+            padding: 1px 6px;
+            border-radius: 6px;
+            border: 1px solid rgba(139, 126, 200, 0.25);
+        """)
+        sub_row.addWidget(id_badge)
+        sub_row.addStretch()
+        title_box.addLayout(sub_row)
+
+        header_layout.addLayout(title_box, 1)
+
         score_lbl = QLabel(f"{match_score}% Match")
         score_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         score_lbl.setStyleSheet("""
-            background-color: #fff0e8;
-            color: #c25e36;
-            font-size: 13px;
+            background-color: #e1f5ef;
+            color: #186a59;
+            font-size: 11px;
             font-weight: 700;
-            padding: 5px 12px;
-            border-radius: 12px;
-            border: 1px solid rgba(194, 94, 54, 0.25);
+            font-family: 'JetBrains Mono', Consolas, monospace;
+            padding: 3px 9px;
+            border-radius: 10px;
+            border: 1px solid #a3eed8;
         """)
-        
-        header_layout.addLayout(title_box, 1)
         header_layout.addWidget(score_lbl, 0)
         layout.addLayout(header_layout)
 
-        # Analysis Summary
-        if analysis:
-            summary_box = QVBoxLayout()
-            summary_box.setSpacing(4)
-            for point in analysis:
-                p_lbl = QLabel(f"• {point}")
-                p_lbl.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-                p_lbl.setWordWrap(True)
-                p_lbl.setStyleSheet("color: #5c6479; font-size: 13px; border: none; line-height: 1.4;")
-                summary_box.addWidget(p_lbl)
-            layout.addLayout(summary_box)
-
-        # Gap & Flag Report
-        has_gaps = bool(missing_core_skills or unsupported_details or formatting_risks)
-        if has_gaps:
-            gap_frame = QFrame()
-            gap_frame.setStyleSheet("""
-                QFrame {
-                    background-color: #fff5f0;
-                    border: 1px solid rgba(194, 94, 54, 0.25);
-                    border-radius: 10px;
-                    padding: 8px;
-                    margin-top: 4px;
-                    margin-bottom: 4px;
-                }
+        # 2. Four Description Sections (No heading, section icon used as bullet)
+        def _build_bullet_section(
+            items: list[str] | None,
+            icon: str,
+            icon_color: str,
+            text_color: str,
+            bg_color: str,
+            border_color: str,
+        ) -> QFrame | None:
+            if not items:
+                return None
+            valid_items = [it.strip() for it in items if it and it.strip()]
+            if not valid_items:
+                return None
+            sec = QFrame()
+            sec.setStyleSheet(f"""
+                QFrame {{
+                    background-color: {bg_color};
+                    border: 1px solid {border_color};
+                    border-radius: 8px;
+                }}
             """)
-            gap_layout = QVBoxLayout(gap_frame)
-            gap_layout.setContentsMargins(10, 8, 10, 8)
-            gap_layout.setSpacing(6)
+            sec_layout = QVBoxLayout(sec)
+            sec_layout.setContentsMargins(8, 4, 8, 4)
+            sec_layout.setSpacing(2)
+            for it in valid_items:
+                lbl = QLabel(f"<span style='color: {icon_color}; font-weight: bold;'>{icon}</span> &nbsp; <span style='color: {text_color};'>{it}</span>")
+                lbl.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+                lbl.setWordWrap(True)
+                lbl.setStyleSheet("font-size: 11px; line-height: 1.3; border: none; background: transparent;")
+                sec_layout.addWidget(lbl)
+            return sec
 
-            gap_header = QLabel("⚠️ GAP & FLAG AUDIT REPORT")
-            gap_header.setStyleSheet("color: #c25e36; font-size: 11px; font-weight: 800; border: none; letter-spacing: 0.6px;")
-            gap_layout.addWidget(gap_header)
+        has_any_content = False
 
-            if missing_core_skills:
-                skills_str = ", ".join(missing_core_skills)
-                skills_lbl = QLabel(f"❌ <b>Missing Core Skills:</b> <span style='color: #8e4555; font-weight: 600;'>{skills_str}</span>")
-                skills_lbl.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-                skills_lbl.setWordWrap(True)
-                skills_lbl.setStyleSheet("color: #591b28; font-size: 12px; border: none;")
-                gap_layout.addWidget(skills_lbl)
+        # Section 1: Favoring items (Green background & green flag)
+        sec1 = _build_bullet_section(
+            analysis,
+            icon="⚑",
+            icon_color="#186a59",
+            text_color="#1e4a3f",
+            bg_color="rgba(225, 245, 239, 0.75)",
+            border_color="rgba(120, 194, 173, 0.45)",
+        )
+        if sec1:
+            layout.addWidget(sec1)
+            has_any_content = True
 
-            if unsupported_details:
-                for item in unsupported_details:
-                    unsup_lbl = QLabel(f"⚠️ <b>Unsupported Requirement:</b> {item}")
-                    unsup_lbl.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-                    unsup_lbl.setWordWrap(True)
-                    unsup_lbl.setStyleSheet("color: #5e2b10; font-size: 12px; border: none;")
-                    gap_layout.addWidget(unsup_lbl)
+        # Section 2: Missing core skills (Orange background & cross)
+        sec2 = _build_bullet_section(
+            missing_core_skills,
+            icon="✕",
+            icon_color="#b04f26",
+            text_color="#5e2b10",
+            bg_color="rgba(255, 240, 232, 0.75)",
+            border_color="rgba(251, 189, 158, 0.5)",
+        )
+        if sec2:
+            layout.addWidget(sec2)
+            has_any_content = True
 
-            if formatting_risks:
-                for item in formatting_risks:
-                    risk_lbl = QLabel(f"🚩 <b>ATS / Formatting Risk:</b> {item}")
-                    risk_lbl.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-                    risk_lbl.setWordWrap(True)
-                    risk_lbl.setStyleSheet("color: #493c81; font-size: 12px; border: none;")
-                    gap_layout.addWidget(risk_lbl)
+        # Section 3: Other highlights / requirements gaps (Orange background & triangle)
+        sec3 = _build_bullet_section(
+            unsupported_details,
+            icon="▲",
+            icon_color="#c25e36",
+            text_color="#5e2b10",
+            bg_color="rgba(255, 244, 238, 0.7)",
+            border_color="rgba(251, 189, 158, 0.4)",
+        )
+        if sec3:
+            layout.addWidget(sec3)
+            has_any_content = True
 
-            layout.addWidget(gap_frame)
-        else:
-            clean_badge = QLabel("✓ Zero Critical Gaps or Formatting Risks Detected")
+        # Section 4: Risks (Red background & red flag)
+        sec4 = _build_bullet_section(
+            formatting_risks,
+            icon="⚑",
+            icon_color="#ba1a1a",
+            text_color="#591b28",
+            bg_color="rgba(255, 218, 214, 0.75)",
+            border_color="rgba(244, 168, 184, 0.55)",
+        )
+        if sec4:
+            layout.addWidget(sec4)
+            has_any_content = True
+
+        if not has_any_content:
+            clean_badge = QLabel("<span style='color: #186a59; font-weight: bold;'>✓</span> &nbsp; Zero Critical Gaps or Formatting Risks Detected")
             clean_badge.setStyleSheet("""
-                background-color: #e1f5ef;
+                background-color: rgba(225, 245, 239, 0.8);
                 color: #186a59;
-                font-size: 12px;
+                font-size: 11px;
                 font-weight: 600;
-                padding: 6px 12px;
+                padding: 4px 8px;
                 border-radius: 8px;
-                border: 1px solid rgba(24, 106, 89, 0.2);
+                border: 1px solid rgba(24, 106, 89, 0.25);
             """)
             layout.addWidget(clean_badge)
 
-        # Actions
-        actions_layout = QHBoxLayout()
-        actions_layout.setSpacing(8)
+        # Subtle separator
+        sep = QFrame()
+        sep.setFrameShape(QFrame.Shape.HLine)
+        sep.setStyleSheet("background-color: rgba(139, 126, 200, 0.18); max-height: 1px; border: none; margin-top: 1px; margin-bottom: 1px;")
+        layout.addWidget(sep)
 
-        approve_btn = QPushButton("Review in Browser")
-        approve_btn.setMinimumHeight(36)
-        approve_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #e0f2fe;
-                color: #1d4ed8;
-                border: 1px solid rgba(59, 130, 246, 0.3);
-                border-radius: 8px;
-                font-weight: 600;
-                font-size: 12px;
-                padding: 6px 12px;
-            }
-            QPushButton:hover {
-                background-color: #bae6fd;
-            }
-        """)
-        
-        applied_btn = QPushButton("Mark Applied")
-        applied_btn.setMinimumHeight(36)
-        applied_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #e1f5ef;
-                color: #186a59;
-                border: 1px solid rgba(24, 106, 89, 0.3);
-                border-radius: 8px;
-                font-weight: 600;
-                font-size: 12px;
-                padding: 6px 12px;
-            }
-            QPushButton:hover {
-                background-color: #c4ede1;
-            }
-        """)
+        # 3. Button Section (Two Rows)
+        def make_combined_btn(
+            left_text: str,
+            right_widget: QWidget,
+            border_color: str,
+            bg_color: str,
+            left_color: str,
+            on_left_click,
+        ) -> QFrame:
+            f = QFrame()
+            f.setFixedHeight(28)
+            f.setStyleSheet(f"""
+                QFrame {{
+                    background-color: {bg_color};
+                    border: 1px solid {border_color};
+                    border-radius: 7px;
+                }}
+            """)
+            h = QHBoxLayout(f)
+            h.setContentsMargins(2, 0, 2, 0)
+            h.setSpacing(0)
 
-        cover_letter_btn = QPushButton("Cover Letter")
-        cover_letter_btn.setMinimumHeight(36)
-        cover_letter_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #f4f2fb;
-                color: #493c81;
-                border: 1px solid rgba(94, 82, 152, 0.25);
-                border-radius: 8px;
-                font-weight: 600;
-                font-size: 12px;
-                padding: 6px 12px;
-            }
-            QPushButton:hover {
-                background-color: #e8e4f7;
-            }
-        """)
-        
-        tailor_cv_btn = QPushButton("Tailor CV")
-        tailor_cv_btn.setMinimumHeight(36)
-        tailor_cv_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #e1f5ef;
-                color: #186a59;
-                border: 1px solid rgba(24, 106, 89, 0.25);
-                border-radius: 8px;
-                font-weight: 600;
-                font-size: 12px;
-                padding: 6px 12px;
-            }
-            QPushButton:hover {
-                background-color: #c4ede1;
-            }
-        """)
-        
-        skip_btn = QPushButton("Skip")
-        skip_btn.setMinimumHeight(36)
-        skip_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #f7f8fc;
-                color: #8f96a8;
-                border: 1px solid rgba(143, 150, 168, 0.3);
-                border-radius: 8px;
-                font-weight: 600;
-                font-size: 12px;
-                padding: 6px 12px;
-            }
-            QPushButton:hover {
-                background-color: #ebedf5;
-                color: #5c6479;
-            }
-        """)
+            b_l = QPushButton(left_text)
+            b_l.setFixedHeight(24)
+            b_l.setStyleSheet(f"""
+                QPushButton {{
+                    background: transparent;
+                    color: {left_color};
+                    border: none;
+                    font-size: 11px;
+                    font-weight: 600;
+                    padding: 0 6px;
+                }}
+                QPushButton:hover {{
+                    background: rgba(255, 255, 255, 0.65);
+                    border-radius: 5px;
+                }}
+            """)
+            b_l.clicked.connect(on_left_click)
+            h.addWidget(b_l, stretch=1)
 
-        def handle_skip() -> None:
-            job = self._runtime.plugins._context.documents.get_job_description(job_id)
-            if job:
-                job.status = "Skipped"
-                self._runtime.plugins._context.documents.save_job_description(job)
-            card.deleteLater()
-            
-        def handle_applied() -> None:
-            job = self._runtime.plugins._context.documents.get_job_description(job_id)
-            if job:
-                job.status = "Applied"
-                self._runtime.plugins._context.documents.save_job_description(job)
-            applied_btn.setEnabled(False)
-            applied_btn.setText("✓ Applied")
-            applied_btn.setStyleSheet("background-color: #a3eed8; color: #186a59; border: 1px solid #78c2ad; border-radius: 8px; font-weight: 700; font-size: 12px;")
-            self.add_agent_message(f"Marked '{title}' at {company} as Applied.")
+            div = QFrame()
+            div.setFixedSize(1, 14)
+            div.setStyleSheet(f"background-color: {border_color}; border: none;")
+            h.addWidget(div)
 
-        approve_btn.clicked.connect(lambda: self._open_for_review(job_id))
-        applied_btn.clicked.connect(handle_applied)
-        skip_btn.clicked.connect(handle_skip)
-        
-        cover_letter_btn.clicked.connect(lambda: self._generate_document("cover_letter", job_id))
-        tailor_cv_btn.clicked.connect(lambda: self._generate_document("tailor_cv", job_id))
-        
-        actions_layout.addWidget(approve_btn)
-        actions_layout.addWidget(applied_btn)
+            h.addWidget(right_widget)
+            return f
 
-        if pdf_path and os.path.exists(pdf_path):
-            open_cv_btn = QPushButton("Open Tailored CV")
-            open_cv_btn.setMinimumHeight(36)
+        # Row 1: Three combined buttons
+        row1 = QHBoxLayout()
+        row1.setSpacing(6)
+        row1.setContentsMargins(0, 0, 0, 0)
+
+        # Combined 1: Tailor CV / Open CV
+        open_cv_btn = QPushButton("Open CV")
+        open_cv_btn.setFixedHeight(24)
+        if card._cv_pdf_path:
             open_cv_btn.setStyleSheet("""
                 QPushButton {
-                    background-color: #e8e4f7;
+                    background: rgba(94, 82, 152, 0.15);
                     color: #5e5298;
-                    border: 1px solid rgba(94, 82, 152, 0.3);
-                    border-radius: 8px;
+                    border: none;
+                    font-size: 10px;
+                    font-weight: 700;
+                    padding: 0 6px;
+                    border-radius: 5px;
+                }
+                QPushButton:hover { background: rgba(94, 82, 152, 0.25); }
+            """)
+        else:
+            open_cv_btn.setStyleSheet("""
+                QPushButton {
+                    background: transparent;
+                    color: #5c6479;
+                    border: none;
+                    font-size: 10px;
                     font-weight: 600;
-                    font-size: 12px;
-                    padding: 6px 12px;
+                    padding: 0 6px;
                 }
                 QPushButton:hover {
-                    background-color: #ddd7f3;
+                    background: rgba(255, 255, 255, 0.65);
+                    border-radius: 5px;
                 }
             """)
-            open_cv_btn.clicked.connect(lambda checked=False, p=pdf_path: QDesktopServices.openUrl(QUrl.fromLocalFile(p)))
-            actions_layout.addWidget(open_cv_btn)
 
-        actions_layout.addWidget(cover_letter_btn)
-        actions_layout.addWidget(tailor_cv_btn)
+        def handle_open_cv() -> None:
+            expected_cv = os.path.join(os.getcwd(), "outputs", "resumes", f"Vijay_Srivastava_FullStack_{s_no}.pdf")
+            if not card._cv_pdf_path and os.path.exists(expected_cv):
+                card._cv_pdf_path = expected_cv
+            if card._cv_pdf_path and os.path.exists(card._cv_pdf_path):
+                QDesktopServices.openUrl(QUrl.fromLocalFile(card._cv_pdf_path))
+            else:
+                self.add_agent_message(f"No tailored CV generated yet for {portal_id}. Generating Vijay_Srivastava_FullStack_{s_no}.pdf now...")
+                self._generate_document("tailor_cv", job_id)
 
-        next_job_btn = QPushButton("⏭ Move to Next")
-        next_job_btn.setMinimumHeight(36)
-        next_job_btn.setStyleSheet("""
+        open_cv_btn.clicked.connect(handle_open_cv)
+        card._open_cv_btn = open_cv_btn
+
+        btn_tailor_cv = make_combined_btn(
+            "Tailor CV",
+            open_cv_btn,
+            border_color="rgba(139, 126, 200, 0.35)",
+            bg_color="rgba(244, 242, 251, 0.85)",
+            left_color="#5e5298",
+            on_left_click=lambda: self._generate_document("tailor_cv", job_id),
+        )
+
+        # Combined 2: Tailor Cover / Open Cover
+        open_cover_btn = QPushButton("Open Cover")
+        open_cover_btn.setFixedHeight(24)
+        if card._cover_pdf_path:
+            open_cover_btn.setStyleSheet("""
+                QPushButton {
+                    background: rgba(29, 78, 216, 0.15);
+                    color: #1d4ed8;
+                    border: none;
+                    font-size: 10px;
+                    font-weight: 700;
+                    padding: 0 6px;
+                    border-radius: 5px;
+                }
+                QPushButton:hover { background: rgba(29, 78, 216, 0.25); }
+            """)
+        else:
+            open_cover_btn.setStyleSheet("""
+                QPushButton {
+                    background: transparent;
+                    color: #5c6479;
+                    border: none;
+                    font-size: 10px;
+                    font-weight: 600;
+                    padding: 0 6px;
+                }
+                QPushButton:hover {
+                    background: rgba(255, 255, 255, 0.65);
+                    border-radius: 5px;
+                }
+            """)
+
+        def handle_open_cover() -> None:
+            expected_cover = os.path.join(os.getcwd(), "outputs", "cover_letters", f"Vijay_Srivastava_FullStack_Cover_{s_no}.pdf")
+            if not card._cover_pdf_path and os.path.exists(expected_cover):
+                card._cover_pdf_path = expected_cover
+            if card._cover_pdf_path and os.path.exists(card._cover_pdf_path):
+                QDesktopServices.openUrl(QUrl.fromLocalFile(card._cover_pdf_path))
+            else:
+                self.add_agent_message(f"No cover letter generated yet for {portal_id}. Generating Vijay_Srivastava_FullStack_Cover_{s_no}.pdf now...")
+                self._generate_document("cover_letter", job_id)
+
+        open_cover_btn.clicked.connect(handle_open_cover)
+        card._open_cover_btn = open_cover_btn
+
+        btn_tailor_cover = make_combined_btn(
+            "Tailor Cover",
+            open_cover_btn,
+            border_color="rgba(59, 130, 246, 0.35)",
+            bg_color="rgba(224, 242, 254, 0.8)",
+            left_color="#1d4ed8",
+            on_left_click=lambda: self._generate_document("cover_letter", job_id),
+        )
+
+        # Combined 3: Mark Applied / Applied status indicator
+        is_already_applied = (job_record.status == "Applied") if job_record else False
+        applied_status_lbl = QLabel("✓ Yes" if is_already_applied else "No")
+        applied_status_lbl.setFixedHeight(24)
+        applied_status_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        if is_already_applied:
+            applied_status_lbl.setStyleSheet("color: #186a59; font-size: 10px; font-family: 'JetBrains Mono', Consolas, monospace; font-weight: 700; padding: 0 6px; border: none; background: transparent;")
+        else:
+            applied_status_lbl.setStyleSheet("color: #8f96a8; font-size: 10px; font-family: 'JetBrains Mono', Consolas, monospace; font-weight: 700; padding: 0 6px; border: none; background: transparent;")
+
+        def toggle_applied() -> None:
+            job = self._runtime.plugins._context.documents.get_job_description(job_id)
+            if job:
+                if job.status == "Applied":
+                    job.status = "Parsed"
+                    self._runtime.plugins._context.documents.save_job_description(job)
+                    applied_status_lbl.setText("No")
+                    applied_status_lbl.setStyleSheet("color: #8f96a8; font-size: 10px; font-family: 'JetBrains Mono', Consolas, monospace; font-weight: 700; padding: 0 6px; border: none; background: transparent;")
+                    self.add_agent_message(f"Unmarked '{title}' as Applied.")
+                else:
+                    job.status = "Applied"
+                    self._runtime.plugins._context.documents.save_job_description(job)
+                    applied_status_lbl.setText("✓ Yes")
+                    applied_status_lbl.setStyleSheet("color: #186a59; font-size: 10px; font-family: 'JetBrains Mono', Consolas, monospace; font-weight: 700; padding: 0 6px; border: none; background: transparent;")
+                    self.add_agent_message(f"Marked '{title}' at {company} as Applied.")
+
+        card._applied_status_lbl = applied_status_lbl
+
+        btn_mark_applied = make_combined_btn(
+            "Mark Applied",
+            applied_status_lbl,
+            border_color="rgba(24, 106, 89, 0.35)",
+            bg_color="rgba(225, 245, 239, 0.85)",
+            left_color="#186a59",
+            on_left_click=toggle_applied,
+        )
+
+        row1.addWidget(btn_tailor_cv, 1)
+        row1.addWidget(btn_tailor_cover, 1)
+        row1.addWidget(btn_mark_applied, 1)
+        layout.addLayout(row1)
+
+        # Row 2: Two primary buttons (Apply, Next Job)
+        row2 = QHBoxLayout()
+        row2.setSpacing(6)
+        row2.setContentsMargins(0, 0, 0, 0)
+
+        apply_btn = QPushButton("🚀 Apply")
+        apply_btn.setFixedHeight(30)
+        apply_btn.setStyleSheet("""
             QPushButton {
-                background-color: #fff0e8; 
-                color: #c25e36; 
-                border: 1px solid rgba(194, 94, 54, 0.35); 
-                border-radius: 8px; 
-                font-weight: 600;
-                font-size: 12px;
-                padding: 6px 12px;
+                background-color: #5e5298;
+                color: #ffffff;
+                border: none;
+                border-radius: 8px;
+                font-size: 11px;
+                font-weight: 700;
+                letter-spacing: 0.3px;
             }
-            QPushButton:hover {
-                background-color: #ffe0d0;
-            }
+            QPushButton:hover { background-color: #493c81; }
         """)
-        next_job_btn.clicked.connect(self.move_to_next_job)
-        actions_layout.addWidget(next_job_btn)
+        apply_btn.clicked.connect(lambda: self._open_for_review(job_id))
 
-        actions_layout.addWidget(skip_btn)
-        layout.addLayout(actions_layout)
+        next_btn = QPushButton("⏭ Next Job")
+        next_btn.setFixedHeight(30)
+        next_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #fbbd9e;
+                color: #5e2b10;
+                border: 1px solid rgba(194, 94, 54, 0.3);
+                border-radius: 8px;
+                font-size: 11px;
+                font-weight: 700;
+                letter-spacing: 0.3px;
+            }
+            QPushButton:hover { background-color: #f8ad8a; }
+        """)
+        next_btn.clicked.connect(self.move_to_next_job)
+
+        row2.addWidget(apply_btn, 1)
+        row2.addWidget(next_btn, 1)
+        layout.addLayout(row2)
 
         self._feed_layout.addWidget(card)
 
@@ -1478,6 +1681,7 @@ class ProcessWorkspace(QWidget):
             if " at " in job.name:
                 company_name = job.name.split(" at ", 1)[1]
 
+            serial_no = getattr(job, "serial_no", None) or 1
             worker = DocumentGeneratorWorker(
                 analyzer,
                 active_resume.raw_content,
@@ -1485,10 +1689,11 @@ class ProcessWorkspace(QWidget):
                 doc_type,
                 candidate_name=candidate_name,
                 company_name=company_name,
+                serial_no=serial_no,
             )
             self._doc_workers.append(worker)
             worker.agent_message.connect(self.add_agent_message)
-            worker.pdf_ready.connect(self._on_pdf_ready)
+            worker.pdf_ready.connect(lambda dtype, p, jid=job_id: self._on_doc_pdf_ready(dtype, p, jid))
             worker.error.connect(self._on_worker_failed)
             worker.finished.connect(lambda w=worker: self._cleanup_doc_worker(w))
             worker.start()
@@ -1504,6 +1709,43 @@ class ProcessWorkspace(QWidget):
         if worker in self._browser_workers:
             self._browser_workers.remove(worker)
         worker.deleteLater()
+
+    def _on_doc_pdf_ready(self, doc_type: str, pdf_path: str, job_id: str = "") -> None:
+        if job_id and job_id in self._job_cards:
+            card = self._job_cards[job_id]
+            if doc_type == "tailor_cv":
+                card._cv_pdf_path = pdf_path
+                if hasattr(card, "_open_cv_btn"):
+                    card._open_cv_btn.setEnabled(True)
+                    card._open_cv_btn.setStyleSheet("""
+                        QPushButton {
+                            background: rgba(94, 82, 152, 0.15);
+                            color: #5e5298;
+                            border: none;
+                            font-size: 10px;
+                            font-weight: 700;
+                            padding: 0 6px;
+                            border-radius: 5px;
+                        }
+                        QPushButton:hover { background: rgba(94, 82, 152, 0.25); }
+                    """)
+            elif doc_type == "cover_letter":
+                card._cover_pdf_path = pdf_path
+                if hasattr(card, "_open_cover_btn"):
+                    card._open_cover_btn.setEnabled(True)
+                    card._open_cover_btn.setStyleSheet("""
+                        QPushButton {
+                            background: rgba(29, 78, 216, 0.15);
+                            color: #1d4ed8;
+                            border: none;
+                            font-size: 10px;
+                            font-weight: 700;
+                            padding: 0 6px;
+                            border-radius: 5px;
+                        }
+                        QPushButton:hover { background: rgba(29, 78, 216, 0.25); }
+                    """)
+        self._on_pdf_ready(doc_type, pdf_path)
 
     def _on_pdf_ready(self, doc_type: str, pdf_path: str) -> None:
         if os.path.exists(pdf_path):
@@ -1579,7 +1821,8 @@ class ProcessWorkspace(QWidget):
             threshold = self._threshold_slider.value()
             self._hunt_worker = JobHuntWorker(
                 browser, analyzer, active_resume.raw_content, role, location, min_exp,
-                win_x=avail_geo.x() + w, win_y=y_pos, win_w=w, win_h=h, threshold=threshold
+                win_x=avail_geo.x() + w, win_y=y_pos, win_w=w, win_h=h, threshold=threshold,
+                documents_repo=self._runtime.plugins._context.documents,
             )
             self._hunt_worker.agent_message.connect(self.add_agent_message)
             self._hunt_worker.job_evaluating.connect(self._on_job_evaluating)
@@ -1647,14 +1890,20 @@ class ProcessWorkspace(QWidget):
             return
         status = getattr(result, "status", "Analyzed")
         
+        serial_no = getattr(result, "serial_no", None)
         job = JobDescription(
             name=f"{result.title} at {result.company}",
             content=result.description,
             status=status,
             url=result.url,
+            serial_no=serial_no,
         )
         self._runtime.plugins._context.documents.save_job_description(job)
-        analysis = [result.summary, *result.recommendations[:3]]
+        fav_points = getattr(result, "favoring_points", [])
+        if fav_points:
+            analysis = clean_favoring_points(fav_points)
+        else:
+            analysis = clean_favoring_points([result.summary, *result.recommendations[:3]])
         pdf_path = getattr(result, "pdf_path", None)
         unsupported = getattr(result, "unsupported_details", [])
         missing_skills = getattr(result, "missing_core_skills", [])
@@ -1666,6 +1915,7 @@ class ProcessWorkspace(QWidget):
             analysis,
             str(job.id),
             pdf_path=pdf_path,
+            serial_no=job.serial_no,
             unsupported_details=unsupported,
             missing_core_skills=missing_skills,
             formatting_risks=formatting,
@@ -1775,9 +2025,11 @@ class ImportedJob:
         recommendations: list[str],
         status: str = "Analyzed",
         pdf_path: str | None = None,
+        serial_no: int | None = None,
         unsupported_details: list[str] | None = None,
         missing_core_skills: list[str] | None = None,
         formatting_risks: list[str] | None = None,
+        favoring_points: list[str] | None = None,
     ) -> None:
         self.title = title
         self.company = company
@@ -1788,9 +2040,11 @@ class ImportedJob:
         self.recommendations = recommendations
         self.status = status
         self.pdf_path = pdf_path
+        self.serial_no = serial_no
         self.unsupported_details = unsupported_details or []
         self.missing_core_skills = missing_core_skills or []
         self.formatting_risks = formatting_risks or []
+        self.favoring_points = favoring_points or []
 
 
 class BrowserLaunchWorker(QThread):
