@@ -30,28 +30,30 @@ logger = logging.getLogger(__name__)
 
 
 class MetricWidget(QWidget):
-    def __init__(self, label_text: str, parent: QWidget | None = None) -> None:
+    def __init__(self, label_text: str, color: str = "#8b7ec8", track_color: str = "#e8e4f7", parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.label_prefix = label_text
+        self.color = color
+        self.track_color = track_color
         layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(8)
 
         self.lbl = QLabel(f"{label_text} 0%")
-        self.lbl.setStyleSheet("color: #8b90a0; font-family: monospace; font-size: 11px;")
+        self.lbl.setStyleSheet("color: #5c6479; font-family: 'JetBrains Mono', Consolas, monospace; font-size: 11px; font-weight: 600;")
 
         self.pb = QProgressBar()
         self.pb.setRange(0, 100)
         self.pb.setValue(0)
         self.pb.setTextVisible(False)
         self.pb.setFixedHeight(6)
-        self.pb.setStyleSheet("""
-            QProgressBar {
-                background-color: #2a2a2a; border-radius: 4px; border: none;
-            }
-            QProgressBar::chunk {
-                background-color: #adc6ff; border-radius: 4px;
-            }
+        self.pb.setStyleSheet(f"""
+            QProgressBar {{
+                background-color: {self.track_color}; border-radius: 3px; border: none;
+            }}
+            QProgressBar::chunk {{
+                background-color: {self.color}; border-radius: 3px;
+            }}
         """)
 
         layout.addWidget(self.lbl)
@@ -131,41 +133,79 @@ class MainWindow(QMainWindow):
     def __init__(self, runtime: Runtime) -> None:
         super().__init__()
         self._runtime = runtime
-        self.setWindowTitle("OpenClaw")
+        self.setWindowTitle("OpenClaw AI - Autonomous Career Agent & Tailoring Console")
         self.setMinimumSize(1000, 650)
 
         # Central Widget Layout
         central_widget = QWidget()
+        central_widget.setStyleSheet("""
+            QWidget {
+                background-color: #f7f8fc;
+                color: #141c29;
+                font-family: 'Plus Jakarta Sans', 'Segoe UI', -apple-system, sans-serif;
+            }
+        """)
         self.setCentralWidget(central_widget)
         central_layout = QHBoxLayout(central_widget)
         central_layout.setContentsMargins(0, 0, 0, 0)
         central_layout.setSpacing(0)
 
-        # -- LEFT NAVIGATION RAIL --
+        # -- LEFT SLIM PASTEL DOCK (Navigation) --
         nav_rail = QFrame()
-        nav_rail.setFixedWidth(80)
-        nav_rail.setStyleSheet("background-color: #131313; border-right: 1px solid rgba(255,255,255,0.05);")
+        nav_rail.setFixedWidth(72)
+        nav_rail.setStyleSheet("""
+            QFrame {
+                background-color: #ffffff;
+                border-right: 1px solid rgba(139, 126, 200, 0.2);
+            }
+        """)
         nav_layout = QVBoxLayout(nav_rail)
-        nav_layout.setContentsMargins(0, 24, 0, 24)
-        nav_layout.setSpacing(32)
+        nav_layout.setContentsMargins(6, 16, 6, 16)
+        nav_layout.setSpacing(20)
 
-        # Temporary Logo Placeholder
+        # Logo Badge in Pastel Lilac
+        logo_container = QWidget()
+        logo_layout = QHBoxLayout(logo_container)
+        logo_layout.setContentsMargins(0, 0, 0, 0)
+        logo_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
         logo = QLabel("OC")
         logo.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        logo.setStyleSheet("color: #adc6ff; font-weight: bold; font-size: 24px; border: none;")
-        nav_layout.addWidget(logo)
+        logo.setFixedSize(38, 38)
+        logo.setStyleSheet("""
+            background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #8b7ec8, stop:1 #5e5298);
+            color: #ffffff;
+            font-weight: 800;
+            font-size: 15px;
+            border-radius: 10px;
+            border: 1px solid rgba(139, 126, 200, 0.3);
+        """)
+        logo_layout.addWidget(logo)
+        nav_layout.addWidget(logo_container)
 
         # Nav Buttons
         def create_nav_btn(text: str) -> QPushButton:
             btn = QPushButton(text)
-            btn.setFixedSize(80, 60)
+            btn.setFixedHeight(48)
             btn.setStyleSheet("""
                 QPushButton {
-                    background: transparent; color: #8b90a0; 
-                    border: none; font-size: 10px; font-weight: bold;
+                    background: transparent;
+                    color: #5c6479;
+                    border: none;
+                    border-radius: 8px;
+                    font-size: 10px;
+                    font-weight: bold;
+                    letter-spacing: 0.6px;
+                }
+                QPushButton:hover {
+                    background-color: #f4f2fb;
+                    color: #5e5298;
                 }
                 QPushButton:checked {
-                    color: #ecb2ff; border-left: 2px solid #ecb2ff;
+                    background-color: #e8e4f7;
+                    color: #5e5298;
+                    border-left: 3px solid #5e5298;
+                    border-radius: 6px;
                 }
             """)
             btn.setCheckable(True)
@@ -182,32 +222,93 @@ class MainWindow(QMainWindow):
         nav_layout.addWidget(self._btn_history)
         nav_layout.addStretch()
 
+        # User profile badge at bottom of dock
+        user_badge = QLabel("VK")
+        user_badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        user_badge.setFixedSize(34, 34)
+        user_badge.setStyleSheet("""
+            background-color: #f4f2fb;
+            color: #5e5298;
+            font-weight: bold;
+            font-size: 11px;
+            border: 1px solid rgba(139, 126, 200, 0.35);
+            border-radius: 10px;
+        """)
+        user_layout = QHBoxLayout()
+        user_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        user_layout.addWidget(user_badge)
+        nav_layout.addLayout(user_layout)
+
         # -- RIGHT MAIN AREA --
         right_area = QWidget()
+        right_area.setStyleSheet("background-color: #f7f8fc;")
         right_layout = QVBoxLayout(right_area)
         right_layout.setContentsMargins(0, 0, 0, 0)
         right_layout.setSpacing(0)
 
-        # Top Bar
+        # Top Bar (Pastel Chrome)
         top_bar = QFrame()
-        top_bar.setFixedHeight(64)
-        top_bar.setStyleSheet("background-color: rgba(19, 19, 19, 0.9); border-bottom: 1px solid rgba(255,255,255,0.05);")
+        top_bar.setFixedHeight(50)
+        top_bar.setStyleSheet("""
+            QFrame {
+                background-color: #ffffff;
+                border-bottom: 1px solid rgba(139, 126, 200, 0.18);
+            }
+        """)
         top_bar_layout = QHBoxLayout(top_bar)
-        top_bar_layout.setContentsMargins(24, 0, 24, 0)
+        top_bar_layout.setContentsMargins(20, 0, 20, 0)
+        top_bar_layout.setSpacing(12)
 
-        top_bar_vlayout = QVBoxLayout()
-        top_bar_vlayout.setSpacing(4)
-        
-        self._status_lbl = QLabel("[ ] System Active    [ ] Ollama server    [ ] AI [None]")
-        self._status_lbl.setStyleSheet("color: #e5e2e1; font-size: 13px; font-weight: bold; border: none;")
-        
+        # Brand / App Header
+        brand_lbl = QLabel("OPENCLAW")
+        brand_lbl.setStyleSheet("color: #141c29; font-size: 13px; font-weight: 800; letter-spacing: 0.5px; border: none;")
+        top_bar_layout.addWidget(brand_lbl)
+
+        ver_badge = QLabel("v2.4 PRO")
+        ver_badge.setStyleSheet("""
+            background-color: #e8e4f7;
+            color: #5e5298;
+            font-size: 10px;
+            font-family: 'JetBrains Mono', Consolas, monospace;
+            font-weight: 700;
+            padding: 2px 7px;
+            border-radius: 9px;
+            border: 1px solid rgba(139, 126, 200, 0.3);
+        """)
+        top_bar_layout.addWidget(ver_badge)
+
+        top_bar_layout.addSpacing(12)
+
+        # Status Badges
+        self._sys_status_pill = QLabel("● SYSTEM ACTIVE")
+        self._sys_status_pill.setStyleSheet("""
+            background-color: #e1f5ef;
+            color: #186a59;
+            font-size: 11px;
+            font-weight: bold;
+            padding: 3px 10px;
+            border-radius: 11px;
+            border: 1px solid #a3eed8;
+        """)
+        top_bar_layout.addWidget(self._sys_status_pill)
+
+        self._ollama_status_pill = QLabel("Ollama: Loading...")
+        self._ollama_status_pill.setStyleSheet("""
+            background-color: #f4f2fb;
+            color: #493c81;
+            font-size: 11px;
+            font-family: 'JetBrains Mono', Consolas, monospace;
+            font-weight: bold;
+            padding: 3px 10px;
+            border-radius: 11px;
+            border: 1px solid rgba(139, 126, 200, 0.3);
+        """)
+        top_bar_layout.addWidget(self._ollama_status_pill)
+
         self._info_lbl = QLabel("Initializing system checks...")
-        self._info_lbl.setStyleSheet("color: #8b90a0; font-size: 11px; border: none;")
-        
-        top_bar_vlayout.addWidget(self._status_lbl)
-        top_bar_vlayout.addWidget(self._info_lbl)
-        
-        top_bar_layout.addLayout(top_bar_vlayout)
+        self._info_lbl.setStyleSheet("color: #5c6479; font-size: 11px; border: none;")
+        top_bar_layout.addWidget(self._info_lbl)
+
         top_bar_layout.addStretch()
 
         right_layout.addWidget(top_bar)
@@ -218,25 +319,33 @@ class MainWindow(QMainWindow):
         self._history = JobPipelineWorkspace(runtime)
 
         self._stacked = QStackedWidget()
+        self._stacked.setStyleSheet("background-color: #f7f8fc;")
         self._stacked.addWidget(self._setup)
         self._stacked.addWidget(self._process)
         self._stacked.addWidget(self._history)
         right_layout.addWidget(self._stacked)
 
-        # Bottom Bar for System Metrics
+        # Bottom Bar for Pastel System Telemetry
         bottom_bar = QFrame()
-        bottom_bar.setFixedHeight(40)
-        bottom_bar.setStyleSheet(
-            "background-color: rgba(19, 19, 19, 0.9); border-top: 1px solid rgba(255,255,255,0.05);"
-        )
+        bottom_bar.setFixedHeight(36)
+        bottom_bar.setStyleSheet("""
+            QFrame {
+                background-color: #ffffff;
+                border-top: 1px solid rgba(139, 126, 200, 0.18);
+            }
+        """)
         bottom_layout = QHBoxLayout(bottom_bar)
-        bottom_layout.setContentsMargins(24, 0, 24, 0)
+        bottom_layout.setContentsMargins(20, 0, 20, 0)
         bottom_layout.setSpacing(24)
 
-        self._cpu_widget = MetricWidget("CPU")
-        self._ram_widget = MetricWidget("RAM")
-        self._gpu_widget = MetricWidget("GPU")
-        self._vram_widget = MetricWidget("VRAM")
+        telemetry_lbl = QLabel("TELEMETRY:")
+        telemetry_lbl.setStyleSheet("color: #8f96a8; font-size: 10px; font-weight: bold; font-family: 'JetBrains Mono', monospace; border: none;")
+        bottom_layout.addWidget(telemetry_lbl)
+
+        self._cpu_widget = MetricWidget("CPU", color="#93c5fd", track_color="#e0f2fe")
+        self._ram_widget = MetricWidget("RAM", color="#fbbd9e", track_color="#fff0e8")
+        self._gpu_widget = MetricWidget("GPU", color="#78c2ad", track_color="#e1f5ef")
+        self._vram_widget = MetricWidget("VRAM", color="#f4a8b8", track_color="#ffdad6")
 
         bottom_layout.addWidget(self._cpu_widget, stretch=1)
         bottom_layout.addWidget(self._ram_widget, stretch=1)
@@ -268,26 +377,26 @@ class MainWindow(QMainWindow):
 
             # Highlight jump > 5% (increasing or decreasing)
             if abs(int_val - old_val) > 5:
-                widget.pb.setFixedHeight(14)
-                widget.pb.setStyleSheet("""
-                    QProgressBar {
-                        background-color: #2a2a2a; border-radius: 8px;
-                    }
-                    QProgressBar::chunk {
-                        background-color: #ffb595; border-radius: 8px;
-                    }
+                widget.pb.setFixedHeight(10)
+                widget.pb.setStyleSheet(f"""
+                    QProgressBar {{
+                        background-color: {widget.track_color}; border-radius: 5px;
+                    }}
+                    QProgressBar::chunk {{
+                        background-color: #fbbd9e; border-radius: 5px;
+                    }}
                 """)
 
                 # Restore original style
                 def restore() -> None:
                     widget.pb.setFixedHeight(6)
-                    widget.pb.setStyleSheet("""
-                        QProgressBar {
-                            background-color: #2a2a2a; border-radius: 4px; border: none;
-                        }
-                        QProgressBar::chunk {
-                            background-color: #adc6ff; border-radius: 4px;
-                        }
+                    widget.pb.setStyleSheet(f"""
+                        QProgressBar {{
+                            background-color: {widget.track_color}; border-radius: 3px; border: none;
+                        }}
+                        QProgressBar::chunk {{
+                            background-color: {widget.color}; border-radius: 3px;
+                        }}
                     """)
 
                 from PySide6.QtCore import QTimer
@@ -325,9 +434,15 @@ class MainWindow(QMainWindow):
         try:
             client = self._runtime.services.get(OLLAMA_CLIENT_SERVICE)
         except LookupError:
-            self._status_lbl.setText("✓ System Active    ✗ Ollama server    ✗ AI [None]")
+            self._sys_status_pill.setText("● SYSTEM ACTIVE")
+            self._ollama_status_pill.setText("Ollama: Missing")
+            self._ollama_status_pill.setStyleSheet("""
+                background-color: #ffdad6; color: #ba1a1a;
+                font-size: 11px; font-family: 'JetBrains Mono', Consolas, monospace; font-weight: bold;
+                padding: 3px 10px; border-radius: 11px; border: 1px solid #ffb2bf;
+            """)
             self._info_lbl.setText("Ollama plugin is not loaded.")
-            self._info_lbl.setStyleSheet("color: #ffb4ab; font-size: 11px; border: none;")
+            self._info_lbl.setStyleSheet("color: #ba1a1a; font-size: 11px; border: none;")
             return
 
         import typing
@@ -362,27 +477,41 @@ class MainWindow(QMainWindow):
         self._health_thread.start()
 
     def _on_health_check_done(self, has_ollama: bool, server_up: bool, models: list[str]) -> None:
-        sys_str = "✓"
-        ollama_str = "✓" if has_ollama and server_up else ("✗" if not has_ollama else "!")
+        model_name = models[0] if models else "None"
         
-        model_name = "None"
-        if models:
-            model_name = models[0]
-            ai_str = "✓"
-        else:
-            ai_str = "✗"
-
-        self._status_lbl.setText(f"{sys_str} System Active    {ollama_str} Ollama server    {ai_str} AI [{model_name}]")
-
-        if not has_ollama:
+        if has_ollama and server_up and models:
+            self._ollama_status_pill.setText(f"Ollama: {model_name}")
+            self._ollama_status_pill.setStyleSheet("""
+                background-color: #f4f2fb; color: #493c81;
+                font-size: 11px; font-family: 'JetBrains Mono', Consolas, monospace; font-weight: bold;
+                padding: 3px 10px; border-radius: 11px; border: 1px solid rgba(139, 126, 200, 0.3);
+            """)
+            self._info_lbl.setText(f"System ready. Active Model: {model_name}")
+            self._info_lbl.setStyleSheet("color: #5c6479; font-size: 11px; border: none;")
+        elif not has_ollama:
+            self._ollama_status_pill.setText("Ollama: Not Found")
+            self._ollama_status_pill.setStyleSheet("""
+                background-color: #ffdad6; color: #ba1a1a;
+                font-size: 11px; font-family: 'JetBrains Mono', Consolas, monospace; font-weight: bold;
+                padding: 3px 10px; border-radius: 11px; border: 1px solid #ffb2bf;
+            """)
             self._info_lbl.setText("Ollama is not installed or not in PATH.")
-            self._info_lbl.setStyleSheet("color: #ffb4ab; font-size: 11px; border: none;")
+            self._info_lbl.setStyleSheet("color: #ba1a1a; font-size: 11px; border: none;")
         elif not server_up:
+            self._ollama_status_pill.setText("Ollama: Offline")
+            self._ollama_status_pill.setStyleSheet("""
+                background-color: #fff0e8; color: #c25e36;
+                font-size: 11px; font-family: 'JetBrains Mono', Consolas, monospace; font-weight: bold;
+                padding: 3px 10px; border-radius: 11px; border: 1px solid #fbbd9e;
+            """)
             self._info_lbl.setText("Ollama is installed but the server is not running.")
-            self._info_lbl.setStyleSheet("color: #ffb595; font-size: 11px; border: none;")
-        elif not models:
-            self._info_lbl.setText("Ollama server is running, but no AI models are installed.")
-            self._info_lbl.setStyleSheet("color: #ffb595; font-size: 11px; border: none;")
+            self._info_lbl.setStyleSheet("color: #c25e36; font-size: 11px; border: none;")
         else:
-            self._info_lbl.setText(f"System ready. Using model: {model_name}")
-            self._info_lbl.setStyleSheet("color: #adc6ff; font-size: 11px; border: none;")
+            self._ollama_status_pill.setText("Ollama: No Models")
+            self._ollama_status_pill.setStyleSheet("""
+                background-color: #fff0e8; color: #c25e36;
+                font-size: 11px; font-family: 'JetBrains Mono', Consolas, monospace; font-weight: bold;
+                padding: 3px 10px; border-radius: 11px; border: 1px solid #fbbd9e;
+            """)
+            self._info_lbl.setText("Ollama server is running, but no models found.")
+            self._info_lbl.setStyleSheet("color: #c25e36; font-size: 11px; border: none;")

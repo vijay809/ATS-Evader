@@ -1,0 +1,575 @@
+<!DOCTYPE html>
+
+<html class="light" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>OpenClaw AI - Autonomous Career Agent &amp; Tailoring Console</title>
+<!-- Tailwind CSS CDN with plugins -->
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<!-- Tailwind Configuration with Target Pastel Theme Tokens -->
+<script>
+  tailwind.config = {
+    darkMode: "class",
+    theme: {
+      extend: {
+        colors: {
+          primary: {
+            DEFAULT: '#5e5298',
+            light: '#8b7ec8',
+            tint: '#e8e4f7',
+            surface: '#f4f2fb',
+            dark: '#493c81'
+          },
+          mint: {
+            DEFAULT: '#186a59',
+            light: '#78c2ad',
+            tint: '#e1f5ef',
+            pill: '#a3eed8'
+          },
+          peach: {
+            DEFAULT: '#c25e36',
+            light: '#fbbd9e',
+            tint: '#fff0e8'
+          },
+          rose: {
+            DEFAULT: '#8e4555',
+            light: '#f4a8b8',
+            tint: '#ffdad6',
+            badge: '#ffb2bf'
+          },
+          sky: {
+            DEFAULT: '#3b82f6',
+            light: '#93c5fd',
+            tint: '#e0f2fe'
+          },
+          pastelSlate: {
+            50: '#f9f9ff',
+            100: '#f0f3ff',
+            200: '#e7eeff',
+            300: '#dbe3f5',
+            400: '#8f96a8',
+            500: '#5c6479',
+            700: '#2b3345',
+            800: '#1e2433',
+            900: '#141c29'
+          }
+        },
+        fontFamily: {
+          sans: ['Plus Jakarta Sans', 'Inter', 'system-ui', 'sans-serif'],
+          mono: ['JetBrains Mono', 'Fira Code', 'monospace']
+        },
+        boxShadow: {
+          'pastel-sm': '0 2px 8px -1px rgba(94, 82, 152, 0.07)',
+          'pastel-card': '0 4px 16px -2px rgba(94, 82, 152, 0.08), 0 1px 3px 0 rgba(0, 0, 0, 0.03)',
+          'pastel-glow': '0 0 18px -3px rgba(139, 126, 200, 0.28)'
+        }
+      }
+    }
+  }
+</script>
+<!-- Google Fonts: Plus Jakarta Sans & JetBrains Mono -->
+<link href="https://fonts.googleapis.com" rel="preconnect"/>
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&amp;family=Plus Jakarta Sans:wght@400;500;600;700;800&amp;display=swap" rel="stylesheet"/>
+<!-- Custom Styles -->
+<style>
+  body {
+    background-color: #f7f8fc;
+    color: #141c29;
+  }
+  ::-webkit-scrollbar {
+    width: 5px;
+    height: 5px;
+  }
+  ::-webkit-scrollbar-track {
+    background: #edf1fa;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: #cbd3e6;
+    border-radius: 9999px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: #aab4cc;
+  }
+  .pastel-card {
+    background: #ffffff;
+    border: 1px solid rgba(139, 126, 200, 0.16);
+    box-shadow: 0 3px 12px -2px rgba(94, 82, 152, 0.06);
+  }
+  .pastel-terminal {
+    background: #191f2e;
+    border: 1px solid rgba(139, 126, 200, 0.2);
+  }
+</style>
+</head>
+<body class="font-sans antialiased h-screen w-screen overflow-hidden flex flex-col select-none text-[13px] bg-[#f7f8fc]">
+<!-- BEGIN: Window Titlebar (Slim Pastel Chrome) -->
+<header class="h-10 bg-white/95 border-b border-primary-light/20 flex items-center justify-between px-3.5 shrink-0 z-50 backdrop-blur-md" data-purpose="window-titlebar">
+<!-- Controls & Branding -->
+<div class="flex items-center gap-3">
+<!-- Pastel Window Dots -->
+<div class="flex items-center gap-1.5">
+<span class="w-3 h-3 rounded-full bg-[#f4a8b8] border border-rose-light/50 inline-block cursor-pointer hover:opacity-80"></span>
+<span class="w-3 h-3 rounded-full bg-[#fbbd9e] border border-peach-light/50 inline-block cursor-pointer hover:opacity-80"></span>
+<span class="w-3 h-3 rounded-full bg-[#78c2ad] border border-mint-light/50 inline-block cursor-pointer hover:opacity-80"></span>
+</div>
+<!-- App Title with Pastel Icon -->
+<div class="flex items-center gap-2 pl-2.5 border-l border-primary-light/20">
+<div class="w-5 h-5 rounded-md bg-primary-tint flex items-center justify-center text-primary font-bold">
+<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2.3" viewbox="0 0 24 24">
+<path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"></path>
+</svg>
+</div>
+<span class="text-xs font-bold tracking-wide text-pastelSlate-900">OPENCLAW</span>
+<span class="text-[10px] font-mono font-semibold px-1.5 py-0.5 rounded-full bg-primary-tint text-primary border border-primary-light/30">v2.4 PRO</span>
+</div>
+</div>
+<!-- Center System Status Badges in Pastel -->
+<div class="hidden sm:flex items-center gap-2.5">
+<div class="flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-mint-tint border border-mint-light/40 text-mint font-semibold text-[11px]">
+<span class="w-2 h-2 rounded-full bg-mint-light animate-pulse shadow-sm"></span>
+      SYSTEM ACTIVE
+    </div>
+<div class="flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-primary-surface border border-primary-light/30 text-primary-dark font-mono text-[11px]">
+<svg class="w-3 h-3 text-primary" fill="none" stroke="currentColor" stroke-width="2" viewbox="0 0 24 24">
+<rect height="8" rx="2" ry="2" width="20" x="2" y="2"></rect>
+<rect height="8" rx="2" ry="2" width="20" x="2" y="14"></rect>
+<line x1="6" x2="6.01" y1="6" y2="6"></line>
+<line x1="6" x2="6.01" y1="18" y2="18"></line>
+</svg>
+<span>Ollama: <strong class="text-primary-dark font-semibold">gemma4:latest</strong></span>
+</div>
+<div class="flex items-center gap-1 px-2 py-0.5 rounded-full bg-sky-tint/60 text-sky text-[11px] font-mono">
+<svg class="w-3 h-3" fill="none" stroke="currentColor" stroke-width="2" viewbox="0 0 24 24">
+<circle cx="12" cy="12" r="10"></circle>
+<polyline points="12 6 12 12 16 14"></polyline>
+</svg>
+<span>Latency: 28ms</span>
+</div>
+</div>
+<!-- Window Actions & Settings -->
+<div class="flex items-center gap-1.5 text-pastelSlate-500">
+<button class="p-1 rounded-md hover:bg-primary-tint/60 text-pastelSlate-700 hover:text-primary transition" title="Global Settings">
+<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewbox="0 0 24 24">
+<circle cx="12" cy="12" r="3"></circle>
+<path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+</svg>
+</button>
+<div class="h-3 w-px bg-primary-light/20 mx-0.5"></div>
+<button class="hover:bg-primary-tint/50 text-pastelSlate-600 rounded px-1.5 py-0.5 text-xs">─</button>
+<button class="hover:bg-primary-tint/50 text-pastelSlate-600 rounded px-1.5 py-0.5 text-xs">□</button>
+<button class="hover:bg-rose-tint hover:text-rose text-pastelSlate-600 rounded px-1.5 py-0.5 text-xs">✕</button>
+</div>
+</header>
+<!-- END: Window Titlebar -->
+<!-- BEGIN: Application Main Container (Optimal for 1080x960 layout) -->
+<div class="flex-1 flex overflow-hidden max-w-[1080px] w-full mx-auto">
+<!-- BEGIN: Left Slim Pastel Dock (Navigation) -->
+<nav class="w-14 bg-white border-r border-primary-light/20 flex flex-col items-center py-3.5 justify-between shrink-0 shadow-sm" data-purpose="primary-navigation-dock">
+<div class="flex flex-col items-center gap-4 w-full">
+<!-- Logo Badge in Pastel Lilac -->
+<div class="w-9 h-9 rounded-xl bg-gradient-to-br from-primary to-primary-light p-0.5 flex items-center justify-center shadow-pastel-sm">
+<div class="w-full h-full bg-white rounded-[9px] flex items-center justify-center">
+<span class="font-extrabold text-xs tracking-tight text-primary">OC</span>
+</div>
+</div>
+<!-- Dock Navigation Items -->
+<div class="flex flex-col items-center gap-2.5 w-full px-1.5 pt-1">
+<!-- Setup Nav Item -->
+<button class="group flex flex-col items-center gap-0.5 w-full py-2 rounded-xl text-pastelSlate-500 hover:text-primary hover:bg-primary-surface transition">
+<svg class="w-4 h-4 transition-transform group-hover:scale-110" fill="none" stroke="currentColor" stroke-width="1.8" viewbox="0 0 24 24">
+<path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"></path>
+<circle cx="12" cy="12" r="3"></circle>
+</svg>
+<span class="text-[8px] font-bold tracking-wider uppercase">Setup</span>
+</button>
+<!-- Process Nav Item (Active - Pastel Lilac highlight) -->
+<button class="group flex flex-col items-center gap-0.5 w-full py-2 rounded-xl bg-primary-tint text-primary font-semibold border border-primary-light/40 shadow-sm relative">
+<span class="absolute left-0 top-1/2 -translate-y-1/2 w-1 h-4 bg-primary rounded-r-full"></span>
+<svg class="w-4 h-4 text-primary" fill="none" stroke="currentColor" stroke-width="2.2" viewbox="0 0 24 24">
+<polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>
+</svg>
+<span class="text-[8px] font-bold tracking-wider uppercase">Process</span>
+</button>
+<!-- History Nav Item -->
+<button class="group flex flex-col items-center gap-0.5 w-full py-2 rounded-xl text-pastelSlate-500 hover:text-primary hover:bg-primary-surface transition">
+<svg class="w-4 h-4 transition-transform group-hover:scale-110" fill="none" stroke="currentColor" stroke-width="1.8" viewbox="0 0 24 24">
+<circle cx="12" cy="12" r="10"></circle>
+<polyline points="12 6 12 12 14 14"></polyline>
+</svg>
+<span class="text-[8px] font-bold tracking-wider uppercase">History</span>
+</button>
+</div>
+</div>
+<!-- User Profile Badge -->
+<div class="flex flex-col items-center gap-1">
+<button class="w-8 h-8 rounded-xl bg-primary-surface border border-primary-light/40 text-primary font-bold text-xs flex items-center justify-center hover:bg-primary-tint transition">
+        VK
+      </button>
+</div>
+</nav>
+<!-- END: Left Slim Pastel Dock -->
+<!-- BEGIN: Content Split Pane (Left Column: Profile & Actions | Right Column: Terminal, JD Evaluation, & Copilot) -->
+<div class="flex-1 flex overflow-hidden">
+<!-- LEFT COLUMN: Target Profile, Controls, & Hardware Telemetry (320px compact) -->
+<aside class="w-[320px] bg-[#f9f9ff] border-r border-primary-light/20 flex flex-col justify-between shrink-0 p-3.5 gap-3 overflow-y-auto" data-purpose="profile-and-controls-panel">
+<div class="space-y-3">
+<!-- Target Profile Header -->
+<div class="flex items-center justify-between">
+<div class="flex items-center gap-2">
+<span class="w-2 h-2 rounded-full bg-primary-light shadow-sm"></span>
+<h2 class="text-xs font-bold tracking-wider uppercase text-pastelSlate-900">Target Profile</h2>
+</div>
+<span class="text-[10px] font-mono text-pastelSlate-500 bg-white px-2 py-0.5 rounded-full border border-primary-light/20">Config #0429</span>
+</div>
+<!-- Target Profile Card Form -->
+<div class="pastel-card rounded-xl p-3 space-y-2.5">
+<!-- Candidate Name -->
+<div>
+<label class="block text-[9px] font-bold uppercase tracking-wider text-pastelSlate-500 mb-1">Candidate Name</label>
+<div class="relative">
+<input class="w-full text-xs font-semibold text-pastelSlate-800 bg-[#f4f2fb]/70 rounded-lg px-2.5 py-1.5 border border-primary-light/20 cursor-default focus:ring-0" readonly="" type="text" value="Vijay Kumar Srivastava"/>
+<span class="absolute right-2 top-1/2 -translate-y-1/2 text-[9px] text-mint font-semibold bg-mint-tint px-1.5 py-0.5 rounded-md border border-mint-light/40 font-mono">Verified</span>
+</div>
+</div>
+<!-- Target Role -->
+<div>
+<label class="block text-[9px] font-bold uppercase tracking-wider text-pastelSlate-500 mb-1">Target Role</label>
+<input class="w-full text-xs font-semibold text-pastelSlate-800 bg-[#f4f2fb]/70 rounded-lg px-2.5 py-1.5 border border-primary-light/20" readonly="" type="text" value="Senior Software Engineer"/>
+</div>
+<!-- Location -->
+<div>
+<label class="block text-[9px] font-bold uppercase tracking-wider text-pastelSlate-500 mb-1">Location</label>
+<div class="flex items-center bg-[#f4f2fb]/70 rounded-lg px-2.5 py-1.5 border border-primary-light/20 gap-1.5">
+<svg class="w-3.5 h-3.5 text-primary shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewbox="0 0 24 24">
+<path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path>
+<circle cx="12" cy="10" r="3"></circle>
+</svg>
+<input class="w-full bg-transparent border-0 p-0 text-xs text-pastelSlate-700 font-medium focus:ring-0" readonly="" type="text" value="Noida, Uttar Pradesh"/>
+</div>
+</div>
+<!-- Experience & Work Mode -->
+<div class="grid grid-cols-2 gap-2">
+<div>
+<label class="block text-[9px] font-bold uppercase tracking-wider text-pastelSlate-500 mb-1">Min Experience</label>
+<div class="bg-[#f4f2fb]/70 rounded-lg px-2.5 py-1.5 border border-primary-light/20 text-xs font-semibold text-pastelSlate-800">
+                5+ Years
+              </div>
+</div>
+<div>
+<label class="block text-[9px] font-bold uppercase tracking-wider text-pastelSlate-500 mb-1">Work Mode</label>
+<div class="bg-[#f4f2fb]/70 rounded-lg px-2.5 py-1.5 border border-primary-light/20 text-xs font-semibold text-pastelSlate-800 truncate">
+                Hybrid / Remote
+              </div>
+</div>
+</div>
+<!-- ATS Threshold Slider Component (Pastel Accent) -->
+<div class="pt-2 border-t border-primary-light/15 space-y-1.5">
+<div class="flex items-center justify-between">
+<label class="text-[9px] font-bold uppercase tracking-wider text-pastelSlate-500">ATS Match Threshold</label>
+<span class="text-xs font-mono font-bold text-primary bg-primary-tint border border-primary-light/40 px-2 py-0.5 rounded-full">50%</span>
+</div>
+<!-- Pastel Styled Slider Track -->
+<div class="space-y-1">
+<input class="w-full h-1.5 bg-primary-tint rounded-lg appearance-none cursor-pointer accent-primary" max="95" min="10" type="range" value="50"/>
+<div class="flex justify-between px-1 text-[8px] font-mono text-pastelSlate-400">
+<span>|</span><span>|</span><span>|</span><span>|</span><span>|</span>
+<span class="text-primary font-bold">|</span>
+<span>|</span><span>|</span><span>|</span><span>|</span><span>|</span>
+</div>
+</div>
+</div>
+</div>
+<!-- Hunting Execution Action Buttons (Pastel Coral/Rose & Peach) -->
+<div class="space-y-2 pt-0.5" data-purpose="execution-action-buttons">
+<!-- Primary: Stop Hunt in Soft Muted Rose / Coral -->
+<button class="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-[#f4a8b8] hover:bg-[#ee95a8] text-[#591b28] font-bold text-xs tracking-wider uppercase shadow-pastel-sm transition active:scale-[0.99] border border-rose/20">
+<span class="w-2 h-2 rounded-sm bg-[#591b28]"></span>
+            Stop Hunt Execution
+          </button>
+<!-- Staged Next Action: Move to Next Job in Pastel Peach/Amber -->
+<button class="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-[#fbbd9e] hover:bg-[#f8ad8a] text-[#5e2b10] font-bold text-xs tracking-wider uppercase shadow-pastel-sm transition active:scale-[0.99] border border-peach-light">
+<svg class="w-3.5 h-3.5 fill-current" viewbox="0 0 24 24">
+<path d="M5 4l10 8-10 8V4zm11 0h3v16h-3V4z"></path>
+</svg>
+            Move to Next Job [2/18]
+          </button>
+<!-- Secondary Actions Grid -->
+<div class="grid grid-cols-2 gap-2 pt-0.5">
+<button class="flex items-center justify-center gap-1.5 py-2 px-2 rounded-xl bg-white hover:bg-primary-surface border border-primary-light/25 text-pastelSlate-700 text-xs font-medium transition shadow-sm">
+<svg class="w-3.5 h-3.5 text-primary" fill="none" stroke="currentColor" stroke-width="2" viewbox="0 0 24 24">
+<path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"></path>
+</svg>
+<span>Reset Browser</span>
+</button>
+<button class="flex items-center justify-center gap-1.5 py-2 px-2 rounded-xl bg-white hover:bg-primary-surface border border-primary-light/25 text-pastelSlate-700 text-xs font-medium transition shadow-sm">
+<svg class="w-3.5 h-3.5 text-primary" fill="none" stroke="currentColor" stroke-width="2" viewbox="0 0 24 24">
+<path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+</svg>
+<span>Outputs</span>
+</button>
+</div>
+</div>
+</div>
+<!-- Hardware Telemetry Meters (Pastel Mint, Sky & Peach) -->
+<div class="pastel-card rounded-xl p-3 border border-primary-light/20 space-y-2 bg-white" data-purpose="telemetry-gauges">
+<div class="flex items-center justify-between border-b border-primary-light/15 pb-1.5">
+<span class="text-[9px] font-mono tracking-wider text-pastelSlate-600 uppercase flex items-center gap-1.5 font-semibold">
+<span class="w-1.5 h-1.5 rounded-full bg-mint-light animate-pulse"></span>
+            Hardware Telemetry
+          </span>
+<span class="text-[9px] font-mono text-pastelSlate-400">RTX 4090 / 64GB</span>
+</div>
+<div class="grid grid-cols-2 gap-x-2.5 gap-y-1.5 text-[10px] font-mono">
+<!-- CPU -->
+<div class="space-y-0.5">
+<div class="flex justify-between text-pastelSlate-600">
+<span>CPU</span>
+<span class="text-sky font-bold">10%</span>
+</div>
+<div class="w-full bg-sky-tint rounded-full h-1 overflow-hidden">
+<div class="bg-sky-light h-1 rounded-full" style="width: 10%"></div>
+</div>
+</div>
+<!-- RAM -->
+<div class="space-y-0.5">
+<div class="flex justify-between text-pastelSlate-600">
+<span>RAM</span>
+<span class="text-peach font-bold">93%</span>
+</div>
+<div class="w-full bg-peach-tint rounded-full h-1 overflow-hidden">
+<div class="bg-peach-light h-1 rounded-full" style="width: 93%"></div>
+</div>
+</div>
+<!-- GPU -->
+<div class="space-y-0.5">
+<div class="flex justify-between text-pastelSlate-600">
+<span>GPU</span>
+<span class="text-pastelSlate-500 font-bold">0%</span>
+</div>
+<div class="w-full bg-mint-tint rounded-full h-1 overflow-hidden">
+<div class="bg-mint-light h-1 rounded-full" style="width: 2%"></div>
+</div>
+</div>
+<!-- VRAM -->
+<div class="space-y-0.5">
+<div class="flex justify-between text-pastelSlate-600">
+<span>VRAM</span>
+<span class="text-rose font-bold">93%</span>
+</div>
+<div class="w-full bg-rose-tint rounded-full h-1 overflow-hidden">
+<div class="bg-rose-light h-1 rounded-full" style="width: 93%"></div>
+</div>
+</div>
+</div>
+</div>
+</aside>
+<!-- END: Left Column -->
+<!-- RIGHT MAIN WORKSPACE: Terminal Feed + Staged Job Card + AI Guidance Bar -->
+<main class="flex-1 flex flex-col min-w-0 bg-[#f7f8fc] p-3.5 gap-3 overflow-y-auto" data-purpose="execution-workspace">
+<!-- TOP: Realtime Autonomous Agent Terminal Feed (Compact Soft Dark / Pastel Container) -->
+<section class="pastel-terminal rounded-xl p-3 shrink-0 font-mono text-[11px] shadow-sm text-slate-200" data-purpose="terminal-live-feed">
+<!-- Terminal Header Bar -->
+<div class="flex items-center justify-between pb-2 border-b border-white/10 mb-2">
+<div class="flex items-center gap-2">
+<span class="w-2 h-2 rounded-full bg-primary-light animate-pulse"></span>
+<span class="font-semibold text-primary-tint uppercase tracking-wider text-[10px]">Realtime Agent Pipeline Feed</span>
+</div>
+<div class="flex items-center gap-2 text-[10px]">
+<span class="px-2 py-0.5 rounded-full bg-mint-light/20 border border-mint-light/30 text-mint-light font-bold">JOB 2 OF 18</span>
+<span class="text-slate-400">|</span>
+<span class="text-slate-300">Target ATS: 50%</span>
+</div>
+</div>
+<!-- Terminal Log Messages -->
+<div class="space-y-1 leading-relaxed text-slate-300 max-h-24 overflow-y-auto pr-1">
+<div class="flex items-start gap-1.5">
+<span class="text-sky-light">📁 [2/18]</span>
+<span>Fetching job posting data &amp; metadata schema...</span>
+</div>
+<div class="flex items-start gap-1.5">
+<span class="text-sky-light">📁 [2/18]</span>
+<span>Scoring: <strong class="text-white font-medium">'Senior Software Engineer'</strong> at <span class="text-slate-300 italic">Unknown Company</span>...</span>
+</div>
+<div class="flex items-start gap-1.5">
+<span class="text-mint-light font-bold">🎯</span>
+<span class="text-mint-light">Score 65% meets threshold (50%)! Triggering automatic CV tailoring engine...</span>
+</div>
+<div class="flex items-start gap-1.5">
+<span class="text-rose-light">⚡</span>
+<span>CV Tailored! Generating executive LaTeX-formatted PDF...</span>
+</div>
+<div class="flex items-start gap-1.5 bg-white/[0.04] px-1.5 py-0.5 rounded">
+<span class="text-sky-light">📄</span>
+<span class="text-slate-300 text-[10px]">PDF Generated at: <code class="text-sky-light underline font-medium">resumes\cv_ac710137.pdf</code></span>
+</div>
+</div>
+</section>
+<!-- CENTER: Staged Job Evaluation & Analysis Card -->
+<section class="pastel-card rounded-xl p-4 flex-1 flex flex-col justify-between shadow-sm relative overflow-hidden" data-purpose="job-evaluation-dossier">
+<div class="space-y-3">
+<!-- Job Role & Score Header Bar -->
+<div class="flex flex-wrap items-center justify-between gap-2 pb-3 border-b border-primary-light/20">
+<div>
+<div class="flex items-center gap-2">
+<h1 class="text-lg font-bold tracking-tight text-pastelSlate-900">Senior Software Engineer</h1>
+<span class="px-2 py-0.5 rounded-full text-[10px] font-mono font-medium bg-primary-surface text-primary border border-primary-light/30">JD #2026-08</span>
+</div>
+<p class="text-xs font-medium text-pastelSlate-500 flex items-center gap-1.5 mt-0.5">
+<svg class="w-3.5 h-3.5 text-pastelSlate-400" fill="none" stroke="currentColor" stroke-width="2" viewbox="0 0 24 24">
+<path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path>
+<polyline points="9 22 9 12 15 12 15 22"></polyline>
+</svg>
+<span>Unknown Company</span>
+<span class="text-primary-light">•</span>
+<span class="text-primary font-medium">Staged for Final Human Sign-off</span>
+</p>
+</div>
+<!-- Match Score Badge (Pastel Peach/Amber Pill) -->
+<div class="flex items-center gap-2.5">
+<div class="flex flex-col items-end">
+<span class="text-[9px] uppercase font-bold tracking-wider text-peach">Match Rating</span>
+<span class="text-[10px] text-pastelSlate-500 font-mono">Passing ATS: 50%</span>
+</div>
+<div class="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-peach-tint border border-peach-light text-peach shadow-sm">
+<span class="text-lg font-black tracking-tight text-[#c25e36]">65%</span>
+<span class="text-[10px] font-bold uppercase text-[#c25e36]/90">Match</span>
+</div>
+</div>
+</div>
+<!-- AI Assessment Bullet Points (Micro-typography) -->
+<div class="space-y-1.5 text-xs text-pastelSlate-700 leading-normal" data-purpose="ai-analysis-bullets">
+<div class="flex items-start gap-2">
+<div class="w-1.5 h-1.5 rounded-full bg-primary-light mt-1.5 shrink-0"></div>
+<p>Candidate is a strong Senior Software Engineer with <strong>5+ years of experience</strong> (Python, React, LangChain). Seniority match is robust, but the JD centers on the <strong>Microsoft ecosystem (.NET/C# and Azure)</strong>.</p>
+</div>
+<div class="flex items-start gap-2">
+<div class="w-1.5 h-1.5 rounded-full bg-primary-light mt-1.5 shrink-0"></div>
+<p>Highlight any secondary or side-project experience with <strong>C# or .NET/ASP.NET Core</strong> to meet primary hard requirements.</p>
+</div>
+<div class="flex items-start gap-2">
+<div class="w-1.5 h-1.5 rounded-full bg-primary-light mt-1.5 shrink-0"></div>
+<p>Reframe LLM/AI experience to emphasize vector databases &amp; semantic search to align directly with the JD's RAG architecture focus.</p>
+</div>
+</div>
+<!-- GAP & FLAG REPORT Callout Panel (Pastel Peach/Rose Warning) -->
+<div class="rounded-xl bg-peach-tint/60 border border-peach-light/70 p-3 space-y-1.5" data-purpose="gap-and-flags">
+<div class="flex items-center gap-1.5 text-[#b04f26] font-bold text-xs uppercase tracking-wider">
+<svg class="w-3.5 h-3.5 fill-current" viewbox="0 0 24 24">
+<path d="M12 2L1 21h22L12 2zm0 3.99L19.53 19H4.47L12 5.99zM11 10v4h2v-4h-2zm0 6v2h2v-2h-2z"></path>
+</svg>
+<span>Gap &amp; Flag Report Analysis</span>
+</div>
+<div class="space-y-1.5 text-[11px] text-pastelSlate-700">
+<div class="flex items-start gap-1.5">
+<span class="text-rose font-bold shrink-0">✕</span>
+<p><strong class="text-rose">Missing Core Skills:</strong> .NET / C#, ASP.NET Core, Azure Cloud PaaS (OpenAI, AKS, Functions), SQL Server, Cosmos DB, Redis.</p>
+</div>
+<div class="flex items-start gap-1.5">
+<span class="text-peach font-bold shrink-0">▲</span>
+<p><strong class="text-peach">Unsupported Requirement:</strong> Azure ecosystem &amp; enterprise database hands-on evidence not found in primary resume.</p>
+</div>
+<div class="flex items-start gap-1.5 pt-1 border-t border-peach-light/40 text-[10px]">
+<span class="text-primary font-bold shrink-0">►</span>
+<p><strong class="text-primary">ATS / OCR Risk:</strong> Minor hyphenation error <em>'Devel-oper'</em> detected in Summary; auto-corrected in tailored PDF.</p>
+</div>
+</div>
+</div>
+</div>
+<!-- Action Toolbar (Pastel Pills) -->
+<div class="pt-3 border-t border-primary-light/20 mt-3" data-purpose="candidate-decision-toolbar">
+<div class="flex flex-wrap items-center gap-1.5">
+<!-- Review in Browser -->
+<button class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-sky-tint text-sky border border-sky-light/50 hover:bg-sky-light hover:text-white font-semibold text-xs transition duration-150 shadow-sm">
+<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewbox="0 0 24 24">
+<path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
+<polyline points="15 3 21 3 21 9"></polyline>
+<line x1="10" x2="21" y1="14" y2="3"></line>
+</svg>
+<span>Review in Browser</span>
+</button>
+<!-- Mark Applied -->
+<button class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-mint-tint text-mint border border-mint-light/60 hover:bg-mint-light hover:text-white font-semibold text-xs transition duration-150 shadow-sm">
+<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2.2" viewbox="0 0 24 24">
+<polyline points="20 6 9 17 4 12"></polyline>
+</svg>
+<span>Mark Applied</span>
+</button>
+<!-- Open Tailored CV -->
+<button class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary-tint text-primary-dark border border-primary-light/50 hover:bg-primary hover:text-white font-semibold text-xs transition duration-150 shadow-sm">
+<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewbox="0 0 24 24">
+<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+<polyline points="14 2 14 8 20 8"></polyline>
+</svg>
+<span>Open CV</span>
+</button>
+<!-- Write Cover Letter -->
+<button class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary-surface text-pastelSlate-700 border border-primary-light/30 hover:bg-primary-tint hover:text-primary font-semibold text-xs transition duration-150">
+<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewbox="0 0 24 24">
+<path d="M12 19l7-7 3 3-7 7-3-3z"></path>
+<path d="M18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5z"></path>
+</svg>
+<span>Cover Letter</span>
+</button>
+<!-- Tailor CV -->
+<button class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-mint-tint/80 text-mint border border-mint-light/40 hover:bg-mint-light hover:text-white font-semibold text-xs transition duration-150">
+<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewbox="0 0 24 24">
+<circle cx="6" cy="6" r="3"></circle>
+<circle cx="6" cy="18" r="3"></circle>
+<line x1="20" x2="8.12" y1="4" y2="15.88"></line>
+</svg>
+<span>Tailor CV</span>
+</button>
+<!-- Move to Next -->
+<button class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-peach-light/80 text-[#5e2b10] border border-peach-light hover:bg-peach-light hover:text-black font-bold text-xs transition duration-150 ml-auto shadow-sm">
+<span>Next Job</span>
+<svg class="w-3 h-3" fill="none" stroke="currentColor" stroke-width="2.5" viewbox="0 0 24 24">
+<polygon points="5 4 15 12 5 20 5 4"></polygon>
+<line x1="19" x2="19" y1="5" y2="19"></line>
+</svg>
+</button>
+</div>
+</div>
+</section>
+<!-- BOTTOM: Interactive Copilot Chat Guidance Bar -->
+<footer class="pastel-card rounded-xl p-2 shrink-0 border border-primary-light/25 bg-white shadow-pastel-sm" data-purpose="agent-chat-prompt">
+<form class="flex items-center gap-2" onsubmit="event.preventDefault();">
+<!-- AI sparkle icon in pastel lilac -->
+<div class="pl-2 text-primary">
+<svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2.2" viewbox="0 0 24 24">
+<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
+</svg>
+</div>
+<!-- Prompt Input -->
+<input class="flex-1 bg-transparent border-0 text-xs text-pastelSlate-900 placeholder-pastelSlate-400 focus:ring-0 px-2 py-1 font-sans" placeholder="Chat with AI to guide the job hunt or ask questions (e.g. 'Emphasize my Azure PoC from 2023')..." type="text"/>
+<!-- Quick Action Helpers -->
+<button class="p-1.5 rounded-lg text-pastelSlate-500 hover:text-primary hover:bg-primary-surface transition" title="Attach Document" type="button">
+<svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewbox="0 0 24 24">
+<path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"></path>
+</svg>
+</button>
+<button class="p-1.5 rounded-lg text-pastelSlate-500 hover:text-primary hover:bg-primary-surface transition" title="Voice Input" type="button">
+<svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewbox="0 0 24 24">
+<path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path>
+<path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
+<line x1="12" x2="12" y1="19" y2="23"></line>
+<line x1="8" x2="16" y1="23" y2="23"></line>
+</svg>
+</button>
+<!-- Pastel Send Button -->
+<button class="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-primary hover:bg-primary-dark text-white font-semibold text-xs shadow-pastel-sm transition active:scale-95" type="submit">
+<span>Send</span>
+<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2.5" viewbox="0 0 24 24">
+<line x1="22" x2="11" y1="2" y2="13"></line>
+<polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+</svg>
+</button>
+</form>
+</footer>
+</main>
+<!-- END: Right Main Workspace -->
+</div>
+<!-- END: Content Split Pane -->
+</div>
+<!-- END: Application Main Container -->
+</body></html>

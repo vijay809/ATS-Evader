@@ -451,23 +451,35 @@ class ProcessWorkspace(QWidget):
 
         splitter = QSplitter(Qt.Orientation.Horizontal)
 
-        # -- LEFT SIDEBAR (Preferences) --
+        # -- LEFT SIDEBAR (Target Profile & Controls) --
         sidebar = QWidget()
-        sidebar.setStyleSheet("background-color: #1a1a1a; border-right: 1px solid #333;")
+        sidebar.setStyleSheet("""
+            QWidget {
+                background-color: #f9f9ff;
+                border-right: 1px solid rgba(139, 126, 200, 0.2);
+            }
+        """)
         sidebar_layout = QVBoxLayout(sidebar)
-        sidebar_layout.setContentsMargins(24, 24, 24, 24)
-        sidebar_layout.setSpacing(16)
+        sidebar_layout.setContentsMargins(20, 20, 20, 20)
+        sidebar_layout.setSpacing(14)
 
-        header = QLabel("Target Profile")
-        header.setStyleSheet("font-size: 24px; font-weight: bold; color: #e5e2e1; border: none;")
+        header = QLabel("TARGET PROFILE")
+        header.setStyleSheet("""
+            font-size: 13px;
+            font-weight: 800;
+            color: #141c29;
+            letter-spacing: 0.8px;
+            border: none;
+        """)
         sidebar_layout.addWidget(header)
 
-        # Dynamic Preferences area (we will populate this from DB)
+        # Dynamic Preferences area (populated from DB)
         self._pref_layout = QVBoxLayout()
+        self._pref_layout.setSpacing(8)
         sidebar_layout.addLayout(self._pref_layout)
         
-        self._threshold_lbl = QLabel("ATS Threshold: 50%")
-        self._threshold_lbl.setStyleSheet("color: white; font-weight: bold; border: none;")
+        self._threshold_lbl = QLabel("ATS MATCH THRESHOLD: 50%")
+        self._threshold_lbl.setStyleSheet("color: #5c6479; font-size: 11px; font-weight: bold; border: none; letter-spacing: 0.5px;")
         self._threshold_slider = QSlider(Qt.Orientation.Horizontal)
         self._threshold_slider.setRange(5, 95)
         self._threshold_slider.setSingleStep(5)
@@ -475,8 +487,30 @@ class ProcessWorkspace(QWidget):
         self._threshold_slider.setTickInterval(5)
         self._threshold_slider.setTickPosition(QSlider.TickPosition.TicksBelow)
         self._threshold_slider.setValue(50)
+        self._threshold_slider.setStyleSheet("""
+            QSlider::groove:horizontal {
+                height: 6px;
+                background: #e8e4f7;
+                border-radius: 3px;
+            }
+            QSlider::sub-page:horizontal {
+                background: #8b7ec8;
+                border-radius: 3px;
+            }
+            QSlider::handle:horizontal {
+                background: #5e5298;
+                border: 2px solid #ffffff;
+                width: 16px;
+                margin-top: -5px;
+                margin-bottom: -5px;
+                border-radius: 8px;
+            }
+            QSlider::handle:horizontal:hover {
+                background: #493c81;
+            }
+        """)
         self._threshold_slider.valueChanged.connect(
-            lambda v: self._threshold_lbl.setText(f"ATS Threshold: {v}%")
+            lambda v: self._threshold_lbl.setText(f"ATS MATCH THRESHOLD: {v}%")
         )
         sidebar_layout.addWidget(self._threshold_lbl)
         sidebar_layout.addWidget(self._threshold_slider)
@@ -484,96 +518,143 @@ class ProcessWorkspace(QWidget):
         sidebar_layout.addStretch()
 
         self._toggle_btn = QPushButton("Start Job Hunt")
-        self._toggle_btn.setMinimumHeight(48)
+        self._toggle_btn.setMinimumHeight(44)
         self._toggle_btn.setStyleSheet("""
             QPushButton {
-                background-color: #adc6ff; color: #002e69; 
-                border-radius: 8px; font-size: 16px; font-weight: bold;
+                background-color: #5e5298; color: #ffffff; 
+                border-radius: 10px; font-size: 14px; font-weight: bold;
+                border: none;
             }
-            QPushButton:hover { background-color: #cfdcff; }
-            QPushButton:disabled { background-color: #555; color: #aaa; }
+            QPushButton:hover { background-color: #493c81; }
+            QPushButton:disabled { background-color: #dbe3f5; color: #8f96a8; }
         """)
         self._toggle_btn.clicked.connect(self.toggle_job_hunt)
         sidebar_layout.addWidget(self._toggle_btn)
 
         self._next_btn = QPushButton("⏭ Stop & Move to Next")
-        self._next_btn.setMinimumHeight(44)
+        self._next_btn.setMinimumHeight(42)
         self._next_btn.setStyleSheet("""
             QPushButton {
-                background-color: #f59e0b; color: #1c1917; 
-                border-radius: 8px; font-size: 14px; font-weight: bold;
+                background-color: #fbbd9e; color: #5e2b10; 
+                border: 1px solid rgba(194, 94, 54, 0.35);
+                border-radius: 10px; font-size: 13px; font-weight: bold;
             }
-            QPushButton:hover { background-color: #fbbf24; }
-            QPushButton:disabled { background-color: #2a2a2a; color: #555555; border: 1px solid #3d3d3d; }
+            QPushButton:hover { background-color: #f8ad8a; }
+            QPushButton:disabled { background-color: #f0f3ff; color: #8f96a8; border: 1px solid #dbe3f5; }
         """)
         self._next_btn.setEnabled(False)
         self._next_btn.clicked.connect(self.move_to_next_job)
         sidebar_layout.addWidget(self._next_btn)
         
         self._reset_btn = QPushButton("Reset Browser")
-        self._reset_btn.setMinimumHeight(40)
+        self._reset_btn.setMinimumHeight(38)
         self._reset_btn.setStyleSheet("""
             QPushButton {
-                background-color: transparent; color: #ffb4ab; 
-                border: 1px solid #ffb4ab; border-radius: 8px; font-size: 14px; font-weight: bold;
+                background-color: #ffffff; color: #5c6479; 
+                border: 1px solid rgba(139, 126, 200, 0.25); border-radius: 10px; 
+                font-size: 12px; font-weight: 600;
             }
-            QPushButton:hover { background-color: rgba(255, 180, 171, 0.1); }
+            QPushButton:hover { background-color: #f4f2fb; color: #5e5298; border-color: rgba(139, 126, 200, 0.45); }
         """)
         self._reset_btn.clicked.connect(self._reset_browser)
         sidebar_layout.addWidget(self._reset_btn)
 
         self._folder_btn = QPushButton("Open Outputs Folder")
-        self._folder_btn.setMinimumHeight(40)
+        self._folder_btn.setMinimumHeight(38)
         self._folder_btn.setStyleSheet("""
             QPushButton {
-                background-color: transparent; color: #adc6ff; 
-                border: 1px solid #adc6ff; border-radius: 8px; font-size: 14px; font-weight: bold;
+                background-color: #ffffff; color: #5c6479; 
+                border: 1px solid rgba(139, 126, 200, 0.25); border-radius: 10px; 
+                font-size: 12px; font-weight: 600;
             }
-            QPushButton:hover { background-color: rgba(173, 198, 255, 0.1); }
+            QPushButton:hover { background-color: #f4f2fb; color: #5e5298; border-color: rgba(139, 126, 200, 0.45); }
         """)
         self._folder_btn.clicked.connect(self._open_outputs_folder)
         sidebar_layout.addWidget(self._folder_btn)
 
         # -- RIGHT MAIN AREA (Chat/Feed) --
         main_area = QWidget()
-        main_area.setStyleSheet("background-color: #131313;")
+        main_area.setStyleSheet("background-color: #f7f8fc;")
         main_area_layout = QVBoxLayout(main_area)
-        main_area_layout.setContentsMargins(24, 24, 24, 24)
+        main_area_layout.setContentsMargins(20, 20, 20, 20)
+        main_area_layout.setSpacing(12)
         
         # Scrollable feed
         feed_scroll = QScrollArea()
         feed_scroll.setWidgetResizable(True)
-        feed_scroll.setStyleSheet("border: none; background: transparent;")
+        feed_scroll.setStyleSheet("""
+            QScrollArea {
+                border: none; background: transparent;
+            }
+            QScrollBar:vertical {
+                background: #edf1fa;
+                width: 6px;
+                border-radius: 3px;
+            }
+            QScrollBar::handle:vertical {
+                background: #cbd3e6;
+                border-radius: 3px;
+            }
+            QScrollBar::handle:vertical:hover {
+                background: #aab4cc;
+            }
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+                height: 0px;
+            }
+        """)
         
         self._feed_widget = QWidget()
         self._feed_widget.setStyleSheet("background: transparent;")
         self._feed_layout = QVBoxLayout(self._feed_widget)
         self._feed_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
+        self._feed_layout.setSpacing(12)
         feed_scroll.setWidget(self._feed_widget)
         
         main_area_layout.addWidget(feed_scroll, stretch=1)
 
-        # Chat Input
-        chat_layout = QHBoxLayout()
+        # Chat Input Container (Pastel Card with Send Pill)
+        chat_frame = QFrame()
+        chat_frame.setStyleSheet("""
+            QFrame {
+                background-color: #ffffff;
+                border: 1px solid rgba(139, 126, 200, 0.25);
+                border-radius: 24px;
+            }
+        """)
+        chat_layout = QHBoxLayout(chat_frame)
+        chat_layout.setContentsMargins(12, 4, 6, 4)
+        chat_layout.setSpacing(8)
+
+        chat_icon = QLabel("💬")
+        chat_icon.setStyleSheet("font-size: 14px; border: none; background: transparent;")
+        chat_layout.addWidget(chat_icon)
+
         self._chat_input = QLineEdit()
         self._chat_input.setPlaceholderText("Chat with AI to guide the job hunt or ask questions...")
-        self._chat_input.setMinimumHeight(48)
+        self._chat_input.setMinimumHeight(38)
         self._chat_input.setStyleSheet("""
             QLineEdit {
-                background-color: #1c1b1b; color: white; border: 1px solid #333; 
-                border-radius: 24px; padding: 0 16px; font-size: 14px;
+                background: transparent; color: #141c29; border: none;
+                font-size: 13px; padding: 0 4px;
             }
         """)
         
         send_btn = QPushButton("Send")
-        send_btn.setMinimumHeight(48)
-        send_btn.setStyleSheet("background-color: transparent; color: #adc6ff; font-weight: bold; border: none;")
+        send_btn.setFixedHeight(36)
+        send_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #5e5298; color: #ffffff;
+                font-weight: bold; border: none; border-radius: 18px;
+                padding: 0 18px; font-size: 12px;
+            }
+            QPushButton:hover { background-color: #493c81; }
+        """)
         
-        chat_layout.addWidget(self._chat_input)
+        chat_layout.addWidget(self._chat_input, stretch=1)
         chat_layout.addWidget(send_btn)
         send_btn.clicked.connect(self.send_chat_message)
         self._chat_input.returnPressed.connect(self.send_chat_message)
-        main_area_layout.addLayout(chat_layout)
+        main_area_layout.addWidget(chat_frame)
 
         # Add to splitter
         splitter.addWidget(sidebar)
@@ -614,15 +695,23 @@ class ProcessWorkspace(QWidget):
                 
             for k, v in prefs.items():
                 card = QFrame()
-                card.setStyleSheet("background-color: #2a2a2a; border-radius: 8px; padding: 12px; border: none;")
+                card.setStyleSheet("""
+                    QFrame {
+                        background-color: #ffffff;
+                        border: 1px solid rgba(139, 126, 200, 0.2);
+                        border-radius: 10px;
+                        padding: 10px;
+                    }
+                """)
                 card_layout = QVBoxLayout(card)
                 card_layout.setContentsMargins(0,0,0,0)
+                card_layout.setSpacing(3)
                 
                 k_lbl = QLabel(k.upper())
-                k_lbl.setStyleSheet("color: #8b90a0; font-size: 10px; font-weight: bold; font-family: monospace; border: none;")
+                k_lbl.setStyleSheet("color: #8f96a8; font-size: 10px; font-weight: bold; font-family: 'JetBrains Mono', monospace; border: none; letter-spacing: 0.5px;")
                 v_lbl = QLabel(v)
                 v_lbl.setWordWrap(True)
-                v_lbl.setStyleSheet("color: white; font-size: 14px; border: none;")
+                v_lbl.setStyleSheet("color: #141c29; font-size: 13px; font-weight: 600; border: none;")
                 
                 card_layout.addWidget(k_lbl)
                 card_layout.addWidget(v_lbl)
@@ -648,14 +737,40 @@ class ProcessWorkspace(QWidget):
         msg = QLabel(text)
         msg.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         msg.setWordWrap(True)
-        msg.setStyleSheet("color: #ffffff; background-color: #3b4252; border-radius: 8px; padding: 12px; margin-left: 40px;")
+        msg.setStyleSheet("""
+            color: #141c29;
+            background-color: #e8e4f7;
+            border: 1px solid rgba(139, 126, 200, 0.3);
+            border-radius: 12px;
+            padding: 10px 14px;
+            margin-left: 60px;
+            font-size: 13px;
+        """)
         self._feed_layout.addWidget(msg)
 
     def add_agent_message(self, text: str) -> None:
-        msg = QLabel(f"🤖 {text}")
+        msg = QLabel(text)
         msg.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         msg.setWordWrap(True)
-        msg.setStyleSheet("color: #adc6ff; background-color: transparent; padding: 8px; font-style: italic;")
+        if any(text.startswith(p) for p in ("📋", "✅", "🤖", "📁", "🎯", "⚡", "📄", "⏭")):
+            msg.setStyleSheet("""
+                color: #2b3345;
+                background-color: #ffffff;
+                border: 1px solid rgba(139, 126, 200, 0.22);
+                border-left: 4px solid #8b7ec8;
+                border-radius: 8px;
+                padding: 9px 12px;
+                font-size: 12px;
+            """)
+        else:
+            msg.setStyleSheet("""
+                color: #484550;
+                background-color: rgba(244, 242, 251, 0.85);
+                border: 1px solid rgba(139, 126, 200, 0.15);
+                border-radius: 8px;
+                padding: 8px 12px;
+                font-size: 12px;
+            """)
         self._feed_layout.addWidget(msg)
 
     def send_chat_message(self) -> None:
@@ -707,30 +822,61 @@ class ProcessWorkspace(QWidget):
     ) -> None:
         """Adds a job match card to the feed."""
         card = QFrame()
-        card.setStyleSheet("background-color: #1c1b1b; border: 1px solid #adc6ff; border-radius: 12px; padding: 16px;")
+        card.setStyleSheet("""
+            QFrame {
+                background-color: #ffffff;
+                border: 1px solid rgba(139, 126, 200, 0.22);
+                border-radius: 14px;
+                padding: 16px;
+            }
+        """)
         layout = QVBoxLayout(card)
+        layout.setSpacing(10)
+        layout.setContentsMargins(14, 14, 14, 14)
         
         # Header
         header_layout = QHBoxLayout()
-        title_lbl = QLabel(f"{title} @ {company}")
+        header_layout.setSpacing(12)
+        
+        title_box = QVBoxLayout()
+        title_box.setSpacing(2)
+        title_lbl = QLabel(title)
         title_lbl.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         title_lbl.setWordWrap(True)
-        title_lbl.setStyleSheet("font-size: 18px; font-weight: bold; color: white; border: none;")
-        score_lbl = QLabel(f"{match_score}% Match")
-        score_lbl.setStyleSheet("font-size: 16px; font-weight: bold; color: #ecb2ff; border: none;")
+        title_lbl.setStyleSheet("font-size: 16px; font-weight: 700; color: #141c29; border: none;")
         
-        header_layout.addWidget(title_lbl)
-        header_layout.addStretch()
-        header_layout.addWidget(score_lbl)
+        company_lbl = QLabel(company)
+        company_lbl.setStyleSheet("font-size: 13px; font-weight: 600; color: #5c6479; border: none;")
+        title_box.addWidget(title_lbl)
+        title_box.addWidget(company_lbl)
+        
+        score_lbl = QLabel(f"{match_score}% Match")
+        score_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        score_lbl.setStyleSheet("""
+            background-color: #fff0e8;
+            color: #c25e36;
+            font-size: 13px;
+            font-weight: 700;
+            padding: 5px 12px;
+            border-radius: 12px;
+            border: 1px solid rgba(194, 94, 54, 0.25);
+        """)
+        
+        header_layout.addLayout(title_box, 1)
+        header_layout.addWidget(score_lbl, 0)
         layout.addLayout(header_layout)
 
         # Analysis Summary
-        for point in analysis:
-            p_lbl = QLabel(f"• {point}")
-            p_lbl.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-            p_lbl.setWordWrap(True)
-            p_lbl.setStyleSheet("color: #c1c6d7; font-size: 14px; border: none;")
-            layout.addWidget(p_lbl)
+        if analysis:
+            summary_box = QVBoxLayout()
+            summary_box.setSpacing(4)
+            for point in analysis:
+                p_lbl = QLabel(f"• {point}")
+                p_lbl.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+                p_lbl.setWordWrap(True)
+                p_lbl.setStyleSheet("color: #5c6479; font-size: 13px; border: none; line-height: 1.4;")
+                summary_box.addWidget(p_lbl)
+            layout.addLayout(summary_box)
 
         # Gap & Flag Report
         has_gaps = bool(missing_core_skills or unsupported_details or formatting_risks)
@@ -738,28 +884,28 @@ class ProcessWorkspace(QWidget):
             gap_frame = QFrame()
             gap_frame.setStyleSheet("""
                 QFrame {
-                    background-color: rgba(30, 20, 20, 0.6);
-                    border: 1px solid rgba(255, 180, 171, 0.35);
-                    border-radius: 8px;
+                    background-color: #fff5f0;
+                    border: 1px solid rgba(194, 94, 54, 0.25);
+                    border-radius: 10px;
                     padding: 8px;
-                    margin-top: 6px;
-                    margin-bottom: 6px;
+                    margin-top: 4px;
+                    margin-bottom: 4px;
                 }
             """)
             gap_layout = QVBoxLayout(gap_frame)
             gap_layout.setContentsMargins(10, 8, 10, 8)
-            gap_layout.setSpacing(5)
+            gap_layout.setSpacing(6)
 
-            gap_header = QLabel("⚠️ GAP & FLAG REPORT")
-            gap_header.setStyleSheet("color: #ffb4ab; font-size: 12px; font-weight: bold; border: none; letter-spacing: 0.5px;")
+            gap_header = QLabel("⚠️ GAP & FLAG AUDIT REPORT")
+            gap_header.setStyleSheet("color: #c25e36; font-size: 11px; font-weight: 800; border: none; letter-spacing: 0.6px;")
             gap_layout.addWidget(gap_header)
 
             if missing_core_skills:
                 skills_str = ", ".join(missing_core_skills)
-                skills_lbl = QLabel(f"❌ <b>Missing Core Skills:</b> <span style='color: #ffadc6;'>{skills_str}</span>")
+                skills_lbl = QLabel(f"❌ <b>Missing Core Skills:</b> <span style='color: #8e4555; font-weight: 600;'>{skills_str}</span>")
                 skills_lbl.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
                 skills_lbl.setWordWrap(True)
-                skills_lbl.setStyleSheet("color: #e5e2e1; font-size: 13px; border: none;")
+                skills_lbl.setStyleSheet("color: #591b28; font-size: 12px; border: none;")
                 gap_layout.addWidget(skills_lbl)
 
             if unsupported_details:
@@ -767,7 +913,7 @@ class ProcessWorkspace(QWidget):
                     unsup_lbl = QLabel(f"⚠️ <b>Unsupported Requirement:</b> {item}")
                     unsup_lbl.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
                     unsup_lbl.setWordWrap(True)
-                    unsup_lbl.setStyleSheet("color: #ffb595; font-size: 13px; border: none;")
+                    unsup_lbl.setStyleSheet("color: #5e2b10; font-size: 12px; border: none;")
                     gap_layout.addWidget(unsup_lbl)
 
             if formatting_risks:
@@ -775,34 +921,113 @@ class ProcessWorkspace(QWidget):
                     risk_lbl = QLabel(f"🚩 <b>ATS / Formatting Risk:</b> {item}")
                     risk_lbl.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
                     risk_lbl.setWordWrap(True)
-                    risk_lbl.setStyleSheet("color: #e0c48c; font-size: 13px; border: none;")
+                    risk_lbl.setStyleSheet("color: #493c81; font-size: 12px; border: none;")
                     gap_layout.addWidget(risk_lbl)
 
             layout.addWidget(gap_frame)
         else:
             clean_badge = QLabel("✓ Zero Critical Gaps or Formatting Risks Detected")
-            clean_badge.setStyleSheet("color: #a5d6a7; font-size: 12px; font-weight: bold; padding: 4px 0; border: none;")
+            clean_badge.setStyleSheet("""
+                background-color: #e1f5ef;
+                color: #186a59;
+                font-size: 12px;
+                font-weight: 600;
+                padding: 6px 12px;
+                border-radius: 8px;
+                border: 1px solid rgba(24, 106, 89, 0.2);
+            """)
             layout.addWidget(clean_badge)
 
         # Actions
         actions_layout = QHBoxLayout()
+        actions_layout.setSpacing(8)
+
         approve_btn = QPushButton("Review in Browser")
-        approve_btn.setMinimumHeight(40)
-        approve_btn.setStyleSheet("background-color: #4b8eff; color: white; border-radius: 6px; font-weight: bold;")
+        approve_btn.setMinimumHeight(36)
+        approve_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #e0f2fe;
+                color: #1d4ed8;
+                border: 1px solid rgba(59, 130, 246, 0.3);
+                border-radius: 8px;
+                font-weight: 600;
+                font-size: 12px;
+                padding: 6px 12px;
+            }
+            QPushButton:hover {
+                background-color: #bae6fd;
+            }
+        """)
         
         applied_btn = QPushButton("Mark Applied")
-        applied_btn.setMinimumHeight(40)
-        applied_btn.setStyleSheet("background-color: #2e7d32; color: white; border-radius: 6px; font-weight: bold;")
+        applied_btn.setMinimumHeight(36)
+        applied_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #e1f5ef;
+                color: #186a59;
+                border: 1px solid rgba(24, 106, 89, 0.3);
+                border-radius: 8px;
+                font-weight: 600;
+                font-size: 12px;
+                padding: 6px 12px;
+            }
+            QPushButton:hover {
+                background-color: #c4ede1;
+            }
+        """)
 
-        cover_letter_btn = QPushButton("Write Cover Letter")
-        cover_letter_btn.setMinimumHeight(40)
-        cover_letter_btn.setStyleSheet("background-color: #5b3a6e; color: white; border-radius: 6px; font-weight: bold;")
+        cover_letter_btn = QPushButton("Cover Letter")
+        cover_letter_btn.setMinimumHeight(36)
+        cover_letter_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #f4f2fb;
+                color: #493c81;
+                border: 1px solid rgba(94, 82, 152, 0.25);
+                border-radius: 8px;
+                font-weight: 600;
+                font-size: 12px;
+                padding: 6px 12px;
+            }
+            QPushButton:hover {
+                background-color: #e8e4f7;
+            }
+        """)
         
         tailor_cv_btn = QPushButton("Tailor CV")
-        tailor_cv_btn.setMinimumHeight(40)
-        tailor_cv_btn.setStyleSheet("background-color: #3b5a4b; color: white; border-radius: 6px; font-weight: bold;")
+        tailor_cv_btn.setMinimumHeight(36)
+        tailor_cv_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #e1f5ef;
+                color: #186a59;
+                border: 1px solid rgba(24, 106, 89, 0.25);
+                border-radius: 8px;
+                font-weight: 600;
+                font-size: 12px;
+                padding: 6px 12px;
+            }
+            QPushButton:hover {
+                background-color: #c4ede1;
+            }
+        """)
         
         skip_btn = QPushButton("Skip")
+        skip_btn.setMinimumHeight(36)
+        skip_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #f7f8fc;
+                color: #8f96a8;
+                border: 1px solid rgba(143, 150, 168, 0.3);
+                border-radius: 8px;
+                font-weight: 600;
+                font-size: 12px;
+                padding: 6px 12px;
+            }
+            QPushButton:hover {
+                background-color: #ebedf5;
+                color: #5c6479;
+            }
+        """)
+
         def handle_skip() -> None:
             job = self._runtime.plugins._context.documents.get_job_description(job_id)
             if job:
@@ -817,7 +1042,7 @@ class ProcessWorkspace(QWidget):
                 self._runtime.plugins._context.documents.save_job_description(job)
             applied_btn.setEnabled(False)
             applied_btn.setText("✓ Applied")
-            applied_btn.setStyleSheet("background-color: #1b5e20; color: #a5d6a7; border-radius: 6px; font-weight: bold;")
+            applied_btn.setStyleSheet("background-color: #a3eed8; color: #186a59; border: 1px solid #78c2ad; border-radius: 8px; font-weight: 700; font-size: 12px;")
             self.add_agent_message(f"Marked '{title}' at {company} as Applied.")
 
         approve_btn.clicked.connect(lambda: self._open_for_review(job_id))
@@ -832,8 +1057,21 @@ class ProcessWorkspace(QWidget):
 
         if pdf_path and os.path.exists(pdf_path):
             open_cv_btn = QPushButton("Open Tailored CV")
-            open_cv_btn.setMinimumHeight(40)
-            open_cv_btn.setStyleSheet("background-color: rgba(173, 198, 255, 0.15); color: #adc6ff; border: 1px solid rgba(173, 198, 255, 0.35); border-radius: 6px; font-weight: bold;")
+            open_cv_btn.setMinimumHeight(36)
+            open_cv_btn.setStyleSheet("""
+                QPushButton {
+                    background-color: #e8e4f7;
+                    color: #5e5298;
+                    border: 1px solid rgba(94, 82, 152, 0.3);
+                    border-radius: 8px;
+                    font-weight: 600;
+                    font-size: 12px;
+                    padding: 6px 12px;
+                }
+                QPushButton:hover {
+                    background-color: #ddd7f3;
+                }
+            """)
             open_cv_btn.clicked.connect(lambda checked=False, p=pdf_path: QDesktopServices.openUrl(QUrl.fromLocalFile(p)))
             actions_layout.addWidget(open_cv_btn)
 
@@ -841,17 +1079,19 @@ class ProcessWorkspace(QWidget):
         actions_layout.addWidget(tailor_cv_btn)
 
         next_job_btn = QPushButton("⏭ Move to Next")
-        next_job_btn.setMinimumHeight(40)
+        next_job_btn.setMinimumHeight(36)
         next_job_btn.setStyleSheet("""
             QPushButton {
-                background-color: rgba(245, 158, 11, 0.15); 
-                color: #f59e0b; 
-                border: 1px solid rgba(245, 158, 11, 0.4); 
-                border-radius: 6px; 
-                font-weight: bold;
+                background-color: #fff0e8; 
+                color: #c25e36; 
+                border: 1px solid rgba(194, 94, 54, 0.35); 
+                border-radius: 8px; 
+                font-weight: 600;
+                font-size: 12px;
+                padding: 6px 12px;
             }
             QPushButton:hover {
-                background-color: rgba(245, 158, 11, 0.3);
+                background-color: #ffe0d0;
             }
         """)
         next_job_btn.clicked.connect(self.move_to_next_job)
@@ -969,11 +1209,15 @@ class ProcessWorkspace(QWidget):
             self._toggle_btn.setText("⏹ Stop Hunt")
             self._toggle_btn.setStyleSheet("""
                 QPushButton {
-                    background-color: #690000; color: #ffadc6; 
-                    border-radius: 8px; font-size: 16px; font-weight: bold;
+                    background-color: #ffdad6;
+                    color: #591b28;
+                    border: 1px solid rgba(142, 69, 85, 0.35);
+                    border-radius: 10px;
+                    font-size: 15px;
+                    font-weight: bold;
                 }
-                QPushButton:hover { background-color: #850000; }
-                QPushButton:disabled { background-color: #444; color: #888; }
+                QPushButton:hover { background-color: #f4a8b8; }
+                QPushButton:disabled { background-color: #f7f8fc; color: #8f96a8; }
             """)
             self._next_btn.setEnabled(True)
             self._next_btn.setText("⏭ Stop & Move to Next")
@@ -1025,11 +1269,15 @@ class ProcessWorkspace(QWidget):
         self._toggle_btn.setText("Start Job Hunt")
         self._toggle_btn.setStyleSheet("""
             QPushButton {
-                background-color: #adc6ff; color: #002e69; 
-                border-radius: 8px; font-size: 16px; font-weight: bold;
+                background-color: #8b7ec8;
+                color: #ffffff;
+                border: none;
+                border-radius: 10px;
+                font-size: 15px;
+                font-weight: bold;
             }
-            QPushButton:hover { background-color: #cfdcff; }
-            QPushButton:disabled { background-color: #555; color: #aaa; }
+            QPushButton:hover { background-color: #5e5298; }
+            QPushButton:disabled { background-color: #e8e4f7; color: #8f96a8; }
         """)
         self._next_btn.setEnabled(False)
         self._next_btn.setText("⏭ Stop & Move to Next")
@@ -1075,11 +1323,15 @@ class ProcessWorkspace(QWidget):
         self._toggle_btn.setText("Start Job Hunt")
         self._toggle_btn.setStyleSheet("""
             QPushButton {
-                background-color: #adc6ff; color: #002e69; 
-                border-radius: 8px; font-size: 16px; font-weight: bold;
+                background-color: #8b7ec8;
+                color: #ffffff;
+                border: none;
+                border-radius: 10px;
+                font-size: 15px;
+                font-weight: bold;
             }
-            QPushButton:hover { background-color: #cfdcff; }
-            QPushButton:disabled { background-color: #555; color: #aaa; }
+            QPushButton:hover { background-color: #5e5298; }
+            QPushButton:disabled { background-color: #e8e4f7; color: #8f96a8; }
         """)
         self._next_btn.setEnabled(False)
         self._next_btn.setText("⏭ Stop & Move to Next")
@@ -1137,7 +1389,17 @@ class ProcessWorkspace(QWidget):
         label = QLabel(message)
         label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         label.setWordWrap(True)
-        label.setStyleSheet("color: #c1c6d7; background-color: #1c1b1b; border-radius: 8px; padding: 12px;")
+        label.setStyleSheet("""
+            QLabel {
+                background-color: #ffffff;
+                color: #5c6479;
+                border-left: 3px solid #8b7ec8;
+                border: 1px solid rgba(139, 126, 200, 0.2);
+                border-radius: 8px;
+                padding: 12px;
+                font-size: 13px;
+            }
+        """)
         self._feed_layout.addWidget(label)
 
 

@@ -42,18 +42,19 @@ class HistoryProfileWidget(QFrame):
         
         self.setStyleSheet("""
             HistoryProfileWidget {
-                background-color: transparent;
-                border: 1px solid rgba(255,255,255,0.05);
-                border-radius: 8px;
+                background-color: #ffffff;
+                border: 1px solid rgba(139, 126, 200, 0.18);
+                border-radius: 10px;
             }
             HistoryProfileWidget:hover {
-                background-color: rgba(255,255,255,0.02);
+                border-color: rgba(139, 126, 200, 0.35);
+                background-color: #fcfcff;
             }
         """)
         
         self.main_layout = QVBoxLayout(self)
-        self.main_layout.setContentsMargins(16, 16, 16, 16)
-        self.main_layout.setSpacing(12)
+        self.main_layout.setContentsMargins(16, 14, 16, 14)
+        self.main_layout.setSpacing(10)
         
         # Header (Always visible)
         self.header_widget = QWidget()
@@ -61,8 +62,9 @@ class HistoryProfileWidget(QFrame):
         header_layout.setContentsMargins(0, 0, 0, 0)
         
         info_layout = QVBoxLayout()
+        info_layout.setSpacing(2)
         name_lbl = QLabel(resume.name)
-        name_lbl.setStyleSheet("color: #e5e2e1; font-size: 14px; font-weight: bold; border: none;")
+        name_lbl.setStyleSheet("color: #141c29; font-size: 14px; font-weight: 700; border: none;")
         
         # Parse some basic info from JSON
         role = "Historical Resume"
@@ -76,13 +78,13 @@ class HistoryProfileWidget(QFrame):
             
         time_str = datetime.fromtimestamp(resume.created_at, tz=UTC).strftime("%b %d, %H:%M")
         sub_lbl = QLabel(f"{time_str} • {role}")
-        sub_lbl.setStyleSheet("color: #8b90a0; font-family: monospace; font-size: 11px; border: none;")
+        sub_lbl.setStyleSheet("color: #8f96a8; font-size: 12px; font-weight: 500; border: none;")
         
         info_layout.addWidget(name_lbl)
         info_layout.addWidget(sub_lbl)
         
         self.expand_icon = QLabel("▼")
-        self.expand_icon.setStyleSheet("color: #8b90a0; font-size: 12px; border: none;")
+        self.expand_icon.setStyleSheet("color: #8b7ec8; font-size: 12px; font-weight: bold; border: none;")
         
         header_layout.addLayout(info_layout)
         header_layout.addStretch()
@@ -97,39 +99,41 @@ class HistoryProfileWidget(QFrame):
         
         actions_layout = QHBoxLayout()
         actions_layout.setContentsMargins(0, 0, 0, 0)
+        actions_layout.setSpacing(8)
         
         set_active_btn = QPushButton("Set as Active Profile")
         set_active_btn.setStyleSheet("""
             QPushButton {
-                background-color: rgba(173, 198, 255, 0.1);
-                border: 1px solid rgba(173, 198, 255, 0.2);
-                color: #adc6ff;
+                background-color: #e8e4f7;
+                border: 1px solid rgba(94, 82, 152, 0.3);
+                color: #5e5298;
                 border-radius: 6px;
-                padding: 8px;
-                font-weight: bold;
+                padding: 7px 14px;
+                font-weight: 600;
                 font-size: 12px;
             }
-            QPushButton:hover { background-color: rgba(173, 198, 255, 0.2); }
+            QPushButton:hover { background-color: #ddd7f3; }
         """)
         set_active_btn.clicked.connect(lambda: self.on_set_active(str(self.resume.id)))
         
         delete_btn = QPushButton("Delete")
         delete_btn.setStyleSheet("""
             QPushButton {
-                background-color: rgba(255, 180, 171, 0.1);
-                border: 1px solid rgba(255, 180, 171, 0.2);
-                color: #ffb4ab;
+                background-color: #ffdad6;
+                border: 1px solid rgba(142, 69, 85, 0.3);
+                color: #591b28;
                 border-radius: 6px;
-                padding: 8px 16px;
-                font-weight: bold;
+                padding: 7px 14px;
+                font-weight: 600;
                 font-size: 12px;
             }
-            QPushButton:hover { background-color: rgba(255, 180, 171, 0.2); }
+            QPushButton:hover { background-color: #f4a8b8; }
         """)
         delete_btn.clicked.connect(lambda: self.on_delete(str(self.resume.id)))
         
         actions_layout.addWidget(set_active_btn)
         actions_layout.addWidget(delete_btn)
+        actions_layout.addStretch()
         
         details_layout.addLayout(actions_layout)
         
@@ -156,56 +160,56 @@ class ResumeDropZone(QFrame):
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self._default_style = """
             ResumeDropZone {
-                background-color: rgba(255, 255, 255, 0.02);
-                border: 1.5px dashed rgba(173, 198, 255, 0.3);
-                border-radius: 10px;
+                background-color: #ffffff;
+                border: 1.5px dashed rgba(139, 126, 200, 0.45);
+                border-radius: 12px;
             }
             ResumeDropZone:hover {
-                background-color: rgba(173, 198, 255, 0.06);
-                border-color: #adc6ff;
+                background-color: #fcfcff;
+                border-color: #8b7ec8;
             }
         """
         self._hover_style = """
             ResumeDropZone {
-                background-color: rgba(173, 198, 255, 0.12);
-                border: 2px dashed #adc6ff;
-                border-radius: 10px;
+                background-color: #f4f2fb;
+                border: 2px dashed #5e5298;
+                border-radius: 12px;
             }
         """
         self.setStyleSheet(self._default_style)
 
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(16, 14, 16, 14)
+        layout.setContentsMargins(18, 16, 18, 16)
         layout.setSpacing(16)
 
         icon = QLabel("📄")
-        icon.setStyleSheet("font-size: 24px; border: none; background: transparent;")
+        icon.setStyleSheet("font-size: 26px; border: none; background: transparent;")
 
         text_layout = QVBoxLayout()
         text_layout.setSpacing(2)
         title = QLabel("Import Master Resume (PDF, DOCX, TXT)")
-        title.setStyleSheet("color: #adc6ff; font-weight: bold; font-size: 13px; border: none; background: transparent;")
+        title.setStyleSheet("color: #141c29; font-weight: 700; font-size: 13px; border: none; background: transparent;")
         subtitle = QLabel("Drag & drop your document here, or click Browse Files to select")
-        subtitle.setStyleSheet("color: #8b90a0; font-size: 11px; border: none; background: transparent;")
+        subtitle.setStyleSheet("color: #8f96a8; font-size: 11px; border: none; background: transparent;")
         text_layout.addWidget(title)
         text_layout.addWidget(subtitle)
 
         self.status_lbl = QLabel("")
-        self.status_lbl.setStyleSheet("color: #a5d6a7; font-size: 11px; font-weight: bold; border: none; background: transparent;")
+        self.status_lbl.setStyleSheet("color: #186a59; font-size: 11px; font-weight: 700; border: none; background: transparent;")
 
         browse_btn = QPushButton("Browse Files")
         browse_btn.setStyleSheet("""
             QPushButton {
-                background-color: rgba(173, 198, 255, 0.15);
-                color: #adc6ff;
-                border: 1px solid rgba(173, 198, 255, 0.3);
-                border-radius: 6px;
-                padding: 6px 14px;
-                font-weight: bold;
-                font-size: 11px;
+                background-color: #e8e4f7;
+                color: #5e5298;
+                border: 1px solid rgba(94, 82, 152, 0.3);
+                border-radius: 8px;
+                padding: 7px 16px;
+                font-weight: 600;
+                font-size: 12px;
             }
             QPushButton:hover {
-                background-color: rgba(173, 198, 255, 0.25);
+                background-color: #ddd7f3;
             }
         """)
         browse_btn.clicked.connect(self._open_file_dialog)
@@ -270,22 +274,40 @@ class SetupWorkspace(QWidget):
         
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
-        scroll.setStyleSheet("QScrollArea { border: none; background: transparent; }")
+        scroll.setStyleSheet("""
+            QScrollArea { border: none; background: transparent; }
+            QScrollBar:vertical {
+                background: #f7f8fc;
+                width: 8px;
+                margin: 0;
+            }
+            QScrollBar::handle:vertical {
+                background: #d8daf0;
+                min-height: 24px;
+                border-radius: 4px;
+            }
+            QScrollBar::handle:vertical:hover {
+                background: #8b7ec8;
+            }
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+                height: 0px;
+            }
+        """)
         
         container = QWidget()
         container.setStyleSheet("background: transparent;")
         
         layout = QVBoxLayout(container)
-        layout.setContentsMargins(24, 24, 24, 24)
-        layout.setSpacing(24)
+        layout.setContentsMargins(28, 24, 28, 24)
+        layout.setSpacing(20)
         layout.setAlignment(Qt.AlignmentFlag.AlignTop)
 
         # Header
         header = QLabel("System Setup")
-        header.setStyleSheet("font-size: 32px; font-weight: 600; color: #e5e2e1; border: none;")
+        header.setStyleSheet("font-size: 26px; font-weight: 700; color: #141c29; border: none;")
         
         desc = QLabel("Initialize the AI matching engine by uploading or providing a comprehensive master resume.")
-        desc.setStyleSheet("font-size: 16px; color: #c1c6d7; border: none;")
+        desc.setStyleSheet("font-size: 14px; color: #5c6479; border: none;")
         desc.setWordWrap(True)
 
         layout.addWidget(header)
@@ -300,22 +322,62 @@ class SetupWorkspace(QWidget):
         self._text_area = QPlainTextEdit()
         self._text_area.setPlaceholderText("Or paste master resume text directly here...")
         self._text_area.setMinimumHeight(200)
-        self._text_area.setStyleSheet("background-color: #080808; color: #e5e2e1; padding: 16px; border-radius: 8px;")
+        self._text_area.setStyleSheet("""
+            QPlainTextEdit {
+                background-color: #ffffff;
+                color: #141c29;
+                border: 1px solid rgba(139, 126, 200, 0.25);
+                border-radius: 10px;
+                padding: 14px;
+                font-size: 13px;
+                selection-background-color: #e8e4f7;
+                selection-color: #141c29;
+            }
+            QPlainTextEdit:focus {
+                border-color: #8b7ec8;
+            }
+        """)
         
         layout.addWidget(self._text_area)
 
         # Buttons
         btn_layout = QHBoxLayout()
+        btn_layout.setSpacing(12)
+
         self._clear_btn = QPushButton("Clear")
         self._clear_btn.clicked.connect(self._text_area.clear)
         self._clear_btn.setStyleSheet("""
-            QPushButton { background-color: #2a2a2a; color: white; border-radius: 8px; padding: 12px 24px; font-weight: bold; }
-            QPushButton:hover { background-color: #353534; }
+            QPushButton { 
+                background-color: #ffffff; 
+                color: #5c6479; 
+                border: 1px solid rgba(143, 150, 168, 0.35);
+                border-radius: 10px; 
+                padding: 12px 24px; 
+                font-weight: 600; 
+                font-size: 13px;
+            }
+            QPushButton:hover { 
+                background-color: #f7f8fc; 
+                color: #141c29;
+            }
         """)
         
         self._parse_btn = QPushButton("Parse & Extract Details")
-        self._parse_btn.setMinimumHeight(48)
-        self._parse_btn.setStyleSheet("background-color: #005bc1; color: white; border-radius: 12px; font-size: 16px; font-weight: bold;")
+        self._parse_btn.setMinimumHeight(44)
+        self._parse_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #8b7ec8; 
+                color: white; 
+                border: none;
+                border-radius: 10px; 
+                font-size: 14px; 
+                font-weight: 700;
+                padding: 12px 24px;
+            }
+            QPushButton:hover {
+                background-color: #5e5298;
+            }
+        """)
         self._parse_btn.clicked.connect(self._on_parse)
         
         btn_layout.addWidget(self._clear_btn)
@@ -325,8 +387,8 @@ class SetupWorkspace(QWidget):
         # Profiles Section
         self._profiles_container = QWidget()
         self._profiles_layout = QVBoxLayout(self._profiles_container)
-        self._profiles_layout.setContentsMargins(0, 16, 0, 0)
-        self._profiles_layout.setSpacing(24)
+        self._profiles_layout.setContentsMargins(0, 12, 0, 0)
+        self._profiles_layout.setSpacing(20)
         layout.addWidget(self._profiles_container)
 
         scroll.setWidget(container)
@@ -343,6 +405,7 @@ class SetupWorkspace(QWidget):
             if item is not None:
                 w = item.widget()
                 if w is not None:
+                    w.setParent(None)
                     w.deleteLater()
                 
         try:
@@ -380,20 +443,28 @@ class SetupWorkspace(QWidget):
         container = QFrame()
         container.setStyleSheet("""
             QFrame {
-                background-color: rgba(255, 255, 255, 0.03);
-                border: 1px solid rgba(236, 178, 255, 0.15);
-                border-radius: 12px;
+                background-color: #ffffff;
+                border: 1px solid rgba(139, 126, 200, 0.25);
+                border-radius: 14px;
             }
         """)
         layout = QVBoxLayout(container)
-        layout.setContentsMargins(20, 20, 20, 20)
-        layout.setSpacing(12)
+        layout.setContentsMargins(20, 18, 20, 18)
+        layout.setSpacing(10)
         
         header_layout = QHBoxLayout()
         icon = QLabel("👤")
-        icon.setStyleSheet("border: none; background: transparent;")
-        title = QLabel("Currently Active Profile")
-        title.setStyleSheet("color: #ecb2ff; font-family: monospace; font-size: 12px; font-weight: bold; text-transform: uppercase; border: none;")
+        icon.setStyleSheet("border: none; background: transparent; font-size: 16px;")
+        title = QLabel("CURRENTLY ACTIVE PROFILE")
+        title.setStyleSheet("""
+            background-color: #e1f5ef;
+            color: #186a59;
+            font-size: 11px;
+            font-weight: 700;
+            padding: 3px 10px;
+            border-radius: 8px;
+            border: 1px solid rgba(24, 106, 89, 0.2);
+        """)
         header_layout.addWidget(icon)
         header_layout.addWidget(title)
         header_layout.addStretch()
@@ -401,12 +472,21 @@ class SetupWorkspace(QWidget):
         
         info_layout = QHBoxLayout()
         name_lbl = QLabel(resume.name)
-        name_lbl.setStyleSheet("color: #e5e2e1; font-size: 24px; font-weight: bold; border: none;")
+        name_lbl.setStyleSheet("color: #141c29; font-size: 22px; font-weight: 700; border: none;")
         
         role_lbl = QLabel(role)
-        role_lbl.setStyleSheet("color: #adc6ff; font-family: monospace; font-size: 14px; border: none;")
+        role_lbl.setStyleSheet("""
+            color: #5e5298; 
+            font-size: 13px; 
+            font-weight: 600; 
+            border: none; 
+            padding: 4px 10px; 
+            background-color: #e8e4f7; 
+            border-radius: 8px;
+        """)
         
         info_layout.addWidget(name_lbl)
+        info_layout.addSpacing(10)
         info_layout.addWidget(role_lbl)
         info_layout.addStretch()
         layout.addLayout(info_layout)
@@ -417,11 +497,11 @@ class SetupWorkspace(QWidget):
         container = QWidget()
         layout = QVBoxLayout(container)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(12)
+        layout.setSpacing(10)
         
         header_layout = QHBoxLayout()
-        title = QLabel("Recent History")
-        title.setStyleSheet("color: #8b90a0; font-family: monospace; font-size: 10px; font-weight: bold; text-transform: uppercase; border: none;")
+        title = QLabel("RECENT HISTORY")
+        title.setStyleSheet("color: #8f96a8; font-size: 11px; font-weight: 700; letter-spacing: 0.5px; border: none;")
         header_layout.addWidget(title)
         header_layout.addStretch()
         layout.addLayout(header_layout)

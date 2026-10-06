@@ -49,25 +49,25 @@ class TerminalLoaderOverlay(QFrame):
         self.hide()
         
         # Transparent background for the overlay
-        self.setStyleSheet("TerminalLoaderOverlay { background-color: rgba(19, 19, 19, 0.95); }")
+        self.setStyleSheet("TerminalLoaderOverlay { background-color: rgba(20, 28, 41, 0.45); }")
         
         layout = QVBoxLayout(self)
         layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
         
         # Container to limit width and height
         container = QFrame()
-        container.setFixedSize(600, 400)
+        container.setFixedSize(600, 420)
         container.setStyleSheet("background-color: transparent; border: none;")
         container_layout = QVBoxLayout(container)
-        container_layout.setSpacing(24)
+        container_layout.setSpacing(16)
 
         # Terminal Window
         term_frame = QFrame()
         term_frame.setStyleSheet("""
             QFrame {
-                background-color: rgba(10, 10, 10, 0.9);
-                border: 1px solid rgba(236, 178, 255, 0.15);
-                border-radius: 8px;
+                background-color: #ffffff;
+                border: 1px solid rgba(139, 126, 200, 0.3);
+                border-radius: 12px;
             }
         """)
         term_layout = QVBoxLayout(term_frame)
@@ -76,11 +76,19 @@ class TerminalLoaderOverlay(QFrame):
 
         # Terminal Header
         header = QFrame()
-        header.setFixedHeight(32)
-        header.setStyleSheet("background-color: rgba(42, 42, 42, 0.8); border-bottom: 1px solid rgba(255,255,255,0.05); border-radius: 8px; border-bottom-left-radius: 0; border-bottom-right-radius: 0;")
+        header.setFixedHeight(36)
+        header.setStyleSheet("""
+            QFrame {
+                background-color: #f4f2fb;
+                border-bottom: 1px solid rgba(139, 126, 200, 0.2);
+                border-radius: 12px;
+                border-bottom-left-radius: 0;
+                border-bottom-right-radius: 0;
+            }
+        """)
         header_layout = QHBoxLayout(header)
-        title = QLabel("Loading...")
-        title.setStyleSheet("color: rgba(193, 198, 215, 0.7); font-family: monospace; font-size: 12px; font-weight: bold; border: none;")
+        title = QLabel("AI Parsing Sequence")
+        title.setStyleSheet("color: #5e5298; font-size: 13px; font-weight: 700; border: none;")
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         header_layout.addWidget(title)
         term_layout.addWidget(header)
@@ -88,8 +96,23 @@ class TerminalLoaderOverlay(QFrame):
         # Terminal Body
         self._term_body = QScrollArea()
         self._term_body.setWidgetResizable(True)
-        self._term_body.setFixedHeight(256)
-        self._term_body.setStyleSheet("border: none; background: transparent;")
+        self._term_body.setFixedHeight(260)
+        self._term_body.setStyleSheet("""
+            QScrollArea { border: none; background: transparent; }
+            QScrollBar:vertical {
+                background: #f7f8fc;
+                width: 6px;
+                margin: 0;
+            }
+            QScrollBar::handle:vertical {
+                background: #d8daf0;
+                min-height: 20px;
+                border-radius: 3px;
+            }
+            QScrollBar::handle:vertical:hover {
+                background: #8b7ec8;
+            }
+        """)
         
         self._log_container = QWidget()
         self._log_container.setStyleSheet("background: transparent;")
@@ -105,10 +128,10 @@ class TerminalLoaderOverlay(QFrame):
 
         # Progress Section
         prog_layout = QHBoxLayout()
-        prog_lbl = QLabel("PARSING SEQUENCE")
-        prog_lbl.setStyleSheet("color: #adc6ff; font-family: monospace; font-size: 12px; font-weight: bold; border: none;")
+        prog_lbl = QLabel("PROGRESS")
+        prog_lbl.setStyleSheet("color: #5e5298; font-size: 11px; font-weight: 700; letter-spacing: 0.5px; border: none;")
         self._prog_pct = QLabel("0%")
-        self._prog_pct.setStyleSheet("color: white; font-family: monospace; font-size: 14px; font-weight: bold; border: none;")
+        self._prog_pct.setStyleSheet("color: #141c29; font-size: 13px; font-weight: 700; border: none;")
         prog_layout.addWidget(prog_lbl)
         prog_layout.addStretch()
         prog_layout.addWidget(self._prog_pct)
@@ -117,29 +140,33 @@ class TerminalLoaderOverlay(QFrame):
 
         self._progress = QProgressBar()
         self._progress.setTextVisible(False)
-        self._progress.setFixedHeight(6)
+        self._progress.setFixedHeight(8)
         self._progress.setStyleSheet("""
             QProgressBar {
-                background-color: #2a2a2a;
+                background-color: #e8e4f7;
                 border: none;
-                border-radius: 3px;
+                border-radius: 4px;
             }
             QProgressBar::chunk {
-                background-color: #adc6ff;
-                border-radius: 3px;
+                background-color: #8b7ec8;
+                border-radius: 4px;
             }
         """)
         container_layout.addWidget(self._progress)
 
         # Close Button
         self._close_btn = QPushButton("Close")
-        self._close_btn.setMinimumHeight(40)
+        self._close_btn.setMinimumHeight(38)
         self._close_btn.setStyleSheet("""
             QPushButton {
-                background-color: #2a2a2a; color: white; 
-                border-radius: 6px; font-weight: bold; font-family: monospace;
+                background-color: #8b7ec8; 
+                color: white; 
+                border: none;
+                border-radius: 8px; 
+                font-weight: 700; 
+                font-size: 13px;
             }
-            QPushButton:hover { background-color: #353534; }
+            QPushButton:hover { background-color: #5e5298; }
         """)
         self._close_btn.clicked.connect(self.hide)
         self._close_btn.hide()
@@ -221,15 +248,14 @@ class TerminalLoaderOverlay(QFrame):
         status_lbl.setFixedWidth(80)
         
         if is_error:
-            status_lbl.setStyleSheet("color: #ffb4ab; font-family: monospace; font-size: 9px; font-weight: bold; border: none;")
+            status_lbl.setStyleSheet("color: #8e4555; font-family: monospace; font-size: 10px; font-weight: bold; border: none;")
         elif is_busy:
-            status_lbl.setStyleSheet("color: #ffb595; font-family: monospace; font-size: 9px; font-weight: bold; border: none;")
+            status_lbl.setStyleSheet("color: #c25e36; font-family: monospace; font-size: 10px; font-weight: bold; border: none;")
         else:
-            status_lbl.setStyleSheet("color: #adc6ff; font-family: monospace; font-size: 9px; font-weight: bold; border: none;")
+            status_lbl.setStyleSheet("color: #186a59; font-family: monospace; font-size: 10px; font-weight: bold; border: none;")
             
         text_lbl = QLabel(text)
-        # text_lbl.setWordWrap(True)
-        text_lbl.setStyleSheet("color: #e5e2e1; font-family: monospace; font-size: 9px; border: none;")
+        text_lbl.setStyleSheet("color: #141c29; font-size: 11px; border: none;")
         
         row_layout.addWidget(status_lbl)
         row_layout.addWidget(text_lbl)
@@ -243,7 +269,7 @@ class TerminalLoaderOverlay(QFrame):
         
         # Add dots line
         self._dots_label = QLabel(".")
-        self._dots_label.setStyleSheet("color: #adc6ff; font-family: monospace; font-size: 9px; font-weight: bold; padding-left: 80px; border: none;")
+        self._dots_label.setStyleSheet("color: #8b7ec8; font-family: monospace; font-size: 10px; font-weight: bold; padding-left: 80px; border: none;")
         self._log_layout.addWidget(self._dots_label)
         self._dots_timer.start()
 
