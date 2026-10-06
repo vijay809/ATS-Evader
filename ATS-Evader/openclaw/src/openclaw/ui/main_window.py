@@ -255,6 +255,7 @@ class MainWindow(QMainWindow):
 
         # Start Monitor Thread
         self._monitor_thread = SystemMonitorThread(self)
+        self._monitor_thread.setObjectName("SystemMonitorThread")
         self._monitor_thread.metrics_updated.connect(self._update_metrics)
         self._monitor_thread.start()
 
@@ -301,6 +302,9 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event: QCloseEvent) -> None:
         self._monitor_thread.requestInterruption()
         self._monitor_thread.wait(1500)
+        if hasattr(self, "_health_thread") and self._health_thread.isRunning():
+            self._health_thread.requestInterruption()
+            self._health_thread.wait(1000)
         if hasattr(self, "_process"):
             self._process.cleanup()
         super().closeEvent(event)
@@ -310,8 +314,10 @@ class MainWindow(QMainWindow):
 
     def showEvent(self, event: QShowEvent) -> None:
         super().showEvent(event)
-        # Run health check on startup without blocking UI using QThread
-        self._run_system_health_check()
+        # Run health check on startup only once without blocking UI
+        if not hasattr(self, "_health_checked"):
+            self._health_checked = True
+            self._run_system_health_check()
 
     def _run_system_health_check(self) -> None:
         from openclaw.plugins.ollama import OLLAMA_CLIENT_SERVICE, OllamaClient
@@ -335,6 +341,7 @@ class MainWindow(QMainWindow):
                 self, ollama_client: OllamaClient, parent: QObject | None = None
             ) -> None:
                 super().__init__(parent)
+                self.setObjectName("HealthCheckThread")
                 self.ollama = ollama_client
 
             def run(self) -> None:

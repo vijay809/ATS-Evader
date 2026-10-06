@@ -136,10 +136,15 @@ class BrowserService:
         if not description:
             description = await self._page.locator("body").text_content() or ""
             
+        import re
+        clean_title = re.sub(r"\s+", " ", title).strip() if title else "Unknown Title"
+        clean_company = re.sub(r"\s+", " ", company).strip() if company else "Unknown Company"
+        clean_desc = description.strip() if description else ""
+
         return {
-            "title": title.strip() if title else "",
-            "company": company.strip() if company else "",
-            "description": description.strip() if description else ""
+            "title": clean_title,
+            "company": clean_company,
+            "description": clean_desc,
         }
 
     async def extract_naukri_jd(self, url: str) -> dict[str, str]:

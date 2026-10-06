@@ -37,6 +37,7 @@ class JobHuntWorker(QThread):
 
     def __init__(self, browser_service: BrowserService, ats_analyzer: AtsAnalyzer, active_resume: str, role: str, location: str, min_exp: int, win_x: int = 0, win_y: int = 0, win_w: int = 1280, win_h: int = 800, threshold: int = 50):
         super().__init__()
+        self.setObjectName("JobHuntWorker")
         self.browser = browser_service
         self.analyzer = ats_analyzer
         self.active_resume = active_resume
@@ -57,9 +58,9 @@ class JobHuntWorker(QThread):
 
     async def do_hunt(self) -> None:
         try:
-            self.agent_message.emit(f"Launching browser to search for '{self.role}' in '{self.location}'...")
+            self.agent_message.emit(f"Launching browser to search for '{self.role}' in '{self.location}' (Single-job test mode)...")
             links = await self.browser.search_naukri_jobs(
-                self.role, self.location, max_results=20,
+                self.role, self.location, max_results=1,
                 win_x=self.win_x, win_y=self.win_y, win_w=self.win_w, win_h=self.win_h
             )
             
@@ -67,9 +68,9 @@ class JobHuntWorker(QThread):
                 self.agent_message.emit("No matching jobs found on the current page.")
                 return
                 
-            self.agent_message.emit(f"Found {len(links)} matching job links. Extracting details...")
+            self.agent_message.emit("Found matching job link. Parsing single job for testing...")
             
-            for i, link in enumerate(links):
+            for i, link in enumerate(links[:1]):
                 if self.isInterruptionRequested():
                     self.agent_message.emit("Job Hunt was stopped by the user.")
                     break
@@ -173,6 +174,8 @@ class JobHuntWorker(QThread):
                     pdf_path=job_pdf_path,
                 )
                 self.job_found.emit(job)
+                self.agent_message.emit("Test limit reached: 1 job processed.")
+                break
                 
             self.agent_message.emit("Automated search complete. Awaiting further instructions.")
                 
@@ -187,6 +190,7 @@ class AiChatWorker(QThread):
 
     def __init__(self, navigator: SemanticNavigator, command: str) -> None:
         super().__init__()
+        self.setObjectName("AiChatWorker")
         self.navigator = navigator
         self.command = command
 
@@ -226,6 +230,7 @@ class DocumentGeneratorWorker(QThread):
         company_name: str = "Hiring Team",
     ) -> None:
         super().__init__()
+        self.setObjectName("DocumentGeneratorWorker")
         self.analyzer = analyzer
         self.active_resume = active_resume
         self.job_description = job_description
@@ -820,22 +825,28 @@ class ProcessWorkspace(QWidget):
         """Gracefully interrupt and wait for all background workers before shutdown."""
         if self._hunt_worker and self._hunt_worker.isRunning():
             self._hunt_worker.requestInterruption()
-            self._hunt_worker.wait(2000)
-            self._hunt_worker = None
+            if not self._hunt_worker.wait(3000):
+                self._hunt_worker.terminate()
+                self._hunt_worker.wait(1000)
         for w in list(self._doc_workers):
             if w.isRunning():
                 w.requestInterruption()
-                w.wait(1000)
+                if not w.wait(2000):
+                    w.terminate()
+                    w.wait(500)
         self._doc_workers.clear()
         for w in list(self._browser_workers):
             if w.isRunning():
                 w.requestInterruption()
-                w.wait(1000)
+                if not w.wait(2000):
+                    w.terminate()
+                    w.wait(500)
         self._browser_workers.clear()
         if self._chat_worker and self._chat_worker.isRunning():
             self._chat_worker.requestInterruption()
-            self._chat_worker.wait(1000)
-            self._chat_worker = None
+            if not self._chat_worker.wait(2000):
+                self._chat_worker.terminate()
+                self._chat_worker.wait(500)
 
     def _add_notice(self, message: str) -> None:
         label = QLabel(message)
@@ -875,6 +886,7 @@ class BrowserLaunchWorker(QThread):
 
     def __init__(self, browser: BrowserService, url: str) -> None:
         super().__init__()
+        self.setObjectName("BrowserLaunchWorker")
         self._browser = browser
         self._url = url
 
