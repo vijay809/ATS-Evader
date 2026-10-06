@@ -134,6 +134,11 @@ class JobHuntWorker(QThread):
                     
                 title = jd.get('title', 'Unknown Title')
                 company = jd.get('company', 'Unknown Company')
+                if (not company or company == 'Unknown Company') and link:
+                    from openclaw.plugins.browser import BrowserService
+                    parsed_co = BrowserService._extract_company_from_url(link, title)
+                    if parsed_co:
+                        company = parsed_co
                 
                 logger.info(f"Extracting eligibility facts for: {title} at {company}")
                 

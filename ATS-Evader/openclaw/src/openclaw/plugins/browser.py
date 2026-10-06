@@ -120,6 +120,56 @@ class BrowserService:
     def page(self) -> Page | None:
         return self._page
 
+    @staticmethod
+    def _extract_company_from_url(url: str, title: str = "") -> str | None:
+        if not url:
+            return None
+        import re
+        import urllib.parse
+        path = urllib.parse.urlparse(url).path
+        slug = path.rstrip("/").split("/")[-1]
+        if not slug.startswith("job-listings-"):
+            return None
+        
+        body = slug[len("job-listings-"):]
+        body = re.sub(r'-\d{8,}$', '', body)
+        body = re.sub(r'-\d+-to-\d+-years.*$', '', body, flags=re.IGNORECASE)
+        
+        loc_tokens = [
+            "noida", "greater-noida", "gurgaon", "gurugram", "bangalore", "bengaluru",
+            "hyderabad", "secunderabad", "pune", "mumbai", "navi-mumbai", "chennai",
+            "delhi-ncr", "delhi", "new-delhi", "kolkata", "ahmedabad", "chandigarh",
+            "jaipur", "remote", "india"
+        ]
+        changed = True
+        while changed:
+            changed = False
+            for loc in loc_tokens:
+                if body.lower().endswith(f"-{loc}"):
+                    body = body[:-len(loc)-1]
+                    changed = True
+                    
+        if title:
+            norm_title = re.sub(r'[^a-zA-Z0-9]+', '-', title).strip('-').lower()
+            if body.lower().startswith(norm_title):
+                company_part = body[len(norm_title):].strip('-')
+                if company_part:
+                    return company_part.replace('-', ' ').title()
+            title_words = [w for w in re.split(r'[^a-zA-Z0-9]+', title.lower()) if len(w) > 2]
+            body_words = body.split('-')
+            matched_idx = 0
+            for i, bw in enumerate(body_words):
+                if any(tw in bw.lower() for tw in title_words):
+                    matched_idx = i + 1
+                else:
+                    break
+            if 0 < matched_idx < len(body_words):
+                company_part = '-'.join(body_words[matched_idx:])
+                if company_part:
+                    return company_part.replace('-', ' ').title()
+                    
+        return body.replace('-', ' ').title() if body else None
+
     async def _extract_naukri_jd_impl(self, url: str) -> dict[str, str]:
         if not self._page or self._page.is_closed():
             raise RuntimeError("Browser not launched or page is closed.")
@@ -127,16 +177,145 @@ class BrowserService:
         await self._page.goto(url, wait_until="domcontentloaded")
         await asyncio.sleep(2)
         
-        title = await self._page.locator("h1").first.text_content() or "Unknown Title"
-        company_loc = self._page.locator(".jd-header-comp-name a").first
-        company = await company_loc.text_content() if await company_loc.count() > 0 else "Unknown Company"
-        
-        desc_loc = self._page.locator(".job-desc").first
-        description = await desc_loc.text_content() if await desc_loc.count() > 0 else ""
-        if not description:
-            description = await self._page.locator("body").text_content() or ""
-            
+        import json
         import re
+
+        # 1. Title Extraction
+        title = ""
+        for sel in ["h1", "[class*='jd-header-title']", "header h1", "h1[title]"]:
+            loc = self._page.locator(sel)
+            if await loc.count() > 0:
+                txt = await loc.first.text_content()
+                if txt and txt.strip():
+                    title = txt.strip()
+                    break
+
+        # 2. Company Extraction
+        company = ""
+        # Multi-tiered selector checks for modern Naukri CSS Modules and standard layouts
+        company_selectors = [
+            "[class*='jd-header-comp-name'] a",
+            "[class*='comp-name'] a",
+            "a[title*='Careers']",
+            "a[href*='jobs-careers']",
+            "section[id='job_header'] [class*='comp-name'] a",
+            "[class*='jd-header-comp-name']",
+            "[class*='comp-name']",
+            "h2[title]",  # from About the company
+            ".jd-header-comp-name a",
+            ".comp-name",
+        ]
+        for sel in company_selectors:
+            loc = self._page.locator(sel)
+            if await loc.count() > 0:
+                txt = await loc.first.text_content()
+                if txt and txt.strip() and not txt.strip().startswith("Send me"):
+                    clean = txt.strip().split("\n")[0].strip()
+                    clean = re.sub(r'\d+\.\d+.*$', '', clean).strip()
+                    if clean and len(clean) > 1:
+                        company = clean
+                        break
+
+        # Logo alt fallback
+        if not company:
+            logo_loc = self._page.locator("img[alt*='logo'], img[alt*='Logo']").first
+            if await logo_loc.count() > 0:
+                alt = await logo_loc.get_attribute("alt")
+                if alt:
+                    clean_alt = re.sub(r'\s*logo\s*', '', alt, flags=re.IGNORECASE).strip()
+                    if clean_alt:
+                        company = clean_alt
+
+        # JSON-LD scripts extraction
+        if not company or not title:
+            scripts = await self._page.locator("script[type='application/ld+json']").all()
+            for s in scripts:
+                c = await s.text_content()
+                if c:
+                    try:
+                        data = json.loads(c)
+                        if isinstance(data, dict):
+                            if not title and data.get("title"):
+                                title = data["title"].strip()
+                            h_org = data.get("hiringOrganization")
+                            if isinstance(h_org, dict) and h_org.get("name"):
+                                company = h_org["name"].strip()
+                                break
+                            elif isinstance(h_org, str) and h_org.strip():
+                                company = h_org.strip()
+                                break
+                            if not company and isinstance(data.get("identifier"), dict):
+                                ident_name = data.get("identifier", {}).get("name")
+                                if ident_name and ident_name.strip():
+                                    company = ident_name.strip()
+                                    break
+                    except Exception:
+                        pass
+
+        # 3. Description Extraction
+        desc_selectors = [
+            "[class*='dang-inner-html']",
+            "[class*='job-desc-container']",
+            "[class*='job-desc']",
+            ".job-desc",
+        ]
+        description = ""
+        for sel in desc_selectors:
+            loc = self._page.locator(sel)
+            if await loc.count() > 0:
+                txt = await loc.first.text_content()
+                if txt and txt.strip():
+                    description = txt.strip()
+                    break
+
+        if not description:
+            description = (await self._page.locator("body").text_content() or "").strip()
+
+        # If description contains embedded JSON-LD string but company was missed, try parsing
+        if (not company or company == "Unknown Company") and description and '{"@context"' in description:
+            start = description.find('{"@context"')
+            if start != -1:
+                depth = 0
+                in_string = False
+                escape = False
+                end = -1
+                for i in range(start, len(description)):
+                    char = description[i]
+                    if escape:
+                        escape = False
+                        continue
+                    if char == '\\':
+                        escape = True
+                        continue
+                    if char == '"':
+                        in_string = not in_string
+                        continue
+                    if not in_string:
+                        if char == '{':
+                            depth += 1
+                        elif char == '}':
+                            depth -= 1
+                            if depth == 0:
+                                end = i + 1
+                                break
+                if end != -1:
+                    try:
+                        d = json.loads(description[start:end])
+                        if not title and d.get("title"):
+                            title = d["title"].strip()
+                        if isinstance(d.get("hiringOrganization"), dict) and d["hiringOrganization"].get("name"):
+                            company = d["hiringOrganization"]["name"].strip()
+                        elif isinstance(d.get("identifier"), dict) and d["identifier"].get("name"):
+                            company = d["identifier"]["name"].strip()
+                    except Exception:
+                        pass
+
+        # URL slug fallback if still not found
+        if not company or company == "Unknown Company":
+            parsed_company = BrowserService._extract_company_from_url(url, title)
+            if parsed_company:
+                company = parsed_company
+
         clean_title = re.sub(r"\s+", " ", title).strip() if title else "Unknown Title"
         clean_company = re.sub(r"\s+", " ", company).strip() if company else "Unknown Company"
         clean_desc = description.strip() if description else ""
@@ -166,7 +345,8 @@ class BrowserService:
         await asyncio.sleep(3) # Wait for page to render
         
         links = []
-        locators = await self._page.locator("a.title").all()
+        # Support standard a.title and modern CSS-module variant locators
+        locators = await self._page.locator("a.title, a[class*='title'], [class*='srp-jobtuple'] a[class*='title']").all()
         for loc in locators[:max_results]:
             href = await loc.get_attribute("href")
             if href:
