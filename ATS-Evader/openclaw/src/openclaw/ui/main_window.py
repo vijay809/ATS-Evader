@@ -408,6 +408,9 @@ class MainWindow(QMainWindow):
         update_single_metric(self._gpu_widget, gpu)
         update_single_metric(self._vram_widget, vram)
 
+        if hasattr(self, "_process"):
+            self._process.update_telemetry(cpu, ram, gpu, vram)
+
     def closeEvent(self, event: QCloseEvent) -> None:
         self._monitor_thread.requestInterruption()
         self._monitor_thread.wait(1500)
@@ -488,6 +491,8 @@ class MainWindow(QMainWindow):
             """)
             self._info_lbl.setText(f"System ready. Active Model: {model_name}")
             self._info_lbl.setStyleSheet("color: #5c6479; font-size: 11px; border: none;")
+            if hasattr(self, "_process"):
+                self._process.set_telemetry_model(f"Ollama: {model_name}")
         elif not has_ollama:
             self._ollama_status_pill.setText("Ollama: Not Found")
             self._ollama_status_pill.setStyleSheet("""

@@ -9,10 +9,12 @@ from PySide6.QtCore import Qt, QThread, QUrl, Signal
 from PySide6.QtGui import QDesktopServices, QShowEvent
 from PySide6.QtWidgets import (
     QFrame,
+    QGridLayout,
     QHBoxLayout,
     QLabel,
     QLineEdit,
     QMessageBox,
+    QProgressBar,
     QPushButton,
     QScrollArea,
     QSlider,
@@ -434,6 +436,50 @@ class DocumentGeneratorWorker(QThread):
         except Exception as e:
             self.error.emit(str(e))
 
+
+class SidebarMetricWidget(QWidget):
+    """Compact telemetry gauge widget for sidebar."""
+    def __init__(self, name: str, color: str, track_color: str, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(2)
+        
+        top_row = QHBoxLayout()
+        top_row.setContentsMargins(0, 0, 0, 0)
+        name_lbl = QLabel(name)
+        name_lbl.setStyleSheet("color: #5c6479; font-size: 10px; font-weight: 600; font-family: 'JetBrains Mono', Consolas, monospace; border: none;")
+        self.val_lbl = QLabel("0%")
+        self.val_lbl.setStyleSheet(f"color: {color}; font-size: 10px; font-weight: 700; font-family: 'JetBrains Mono', Consolas, monospace; border: none;")
+        top_row.addWidget(name_lbl)
+        top_row.addStretch()
+        top_row.addWidget(self.val_lbl)
+        layout.addLayout(top_row)
+        
+        self.bar = QProgressBar()
+        self.bar.setRange(0, 100)
+        self.bar.setValue(0)
+        self.bar.setTextVisible(False)
+        self.bar.setFixedHeight(4)
+        self.bar.setStyleSheet(f"""
+            QProgressBar {{
+                background-color: {track_color};
+                border: none;
+                border-radius: 2px;
+            }}
+            QProgressBar::chunk {{
+                background-color: {color};
+                border-radius: 2px;
+            }}
+        """)
+        layout.addWidget(self.bar)
+
+    def set_value(self, val: float) -> None:
+        int_val = int(round(val))
+        self.val_lbl.setText(f"{int_val}%")
+        self.bar.setValue(min(max(int_val, 0), 100))
+
+
 class ProcessWorkspace(QWidget):
     """The central dashboard for agent interaction and job approvals."""
 
@@ -452,40 +498,225 @@ class ProcessWorkspace(QWidget):
         splitter = QSplitter(Qt.Orientation.Horizontal)
 
         # -- LEFT SIDEBAR (Target Profile & Controls) --
-        sidebar = QWidget()
-        sidebar.setStyleSheet("""
-            QWidget {
+        sidebar_scroll = QScrollArea()
+        sidebar_scroll.setFixedWidth(320)
+        sidebar_scroll.setWidgetResizable(True)
+        sidebar_scroll.setStyleSheet("""
+            QScrollArea {
                 background-color: #f9f9ff;
                 border-right: 1px solid rgba(139, 126, 200, 0.2);
+                border-top: none;
+                border-bottom: none;
+                border-left: none;
+            }
+            QScrollBar:vertical {
+                background: transparent;
+                width: 5px;
+                margin: 0;
+            }
+            QScrollBar::handle:vertical {
+                background: #cbd3e6;
+                min-height: 20px;
+                border-radius: 3px;
+            }
+            QScrollBar::handle:vertical:hover {
+                background: #8b7ec8;
             }
         """)
+
+        sidebar = QWidget()
+        sidebar.setStyleSheet("background-color: transparent;")
         sidebar_layout = QVBoxLayout(sidebar)
-        sidebar_layout.setContentsMargins(20, 20, 20, 20)
-        sidebar_layout.setSpacing(14)
+        sidebar_layout.setContentsMargins(14, 14, 14, 14)
+        sidebar_layout.setSpacing(12)
+        sidebar_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
 
-        header = QLabel("TARGET PROFILE")
-        header.setStyleSheet("""
-            font-size: 13px;
-            font-weight: 800;
-            color: #141c29;
-            letter-spacing: 0.8px;
-            border: none;
+        # 1. Target Profile Header
+        header_row = QHBoxLayout()
+        header_row.setContentsMargins(0, 0, 0, 0)
+        header_row.setSpacing(6)
+
+        dot = QLabel("●")
+        dot.setStyleSheet("color: #8b7ec8; font-size: 10px; border: none; background: transparent;")
+        header_title = QLabel("TARGET PROFILE")
+        header_title.setStyleSheet("font-size: 11px; font-weight: 800; color: #141c29; letter-spacing: 0.8px; border: none; background: transparent;")
+        header_row.addWidget(dot)
+        header_row.addWidget(header_title)
+        header_row.addStretch()
+
+        self._config_badge = QLabel("Config #0429")
+        self._config_badge.setStyleSheet("""
+            color: #8f96a8;
+            font-family: 'JetBrains Mono', Consolas, monospace;
+            font-size: 10px;
+            font-weight: 600;
+            background-color: #ffffff;
+            padding: 2px 8px;
+            border-radius: 10px;
+            border: 1px solid rgba(139, 126, 200, 0.25);
         """)
-        sidebar_layout.addWidget(header)
+        header_row.addWidget(self._config_badge)
+        sidebar_layout.addLayout(header_row)
 
-        # Dynamic Preferences area (populated from DB)
-        self._pref_layout = QVBoxLayout()
-        self._pref_layout.setSpacing(8)
-        sidebar_layout.addLayout(self._pref_layout)
+        # 2. Target Profile Card Form (pastel-card)
+        self._profile_card = QFrame()
+        self._profile_card.setStyleSheet("""
+            QFrame {
+                background-color: #ffffff;
+                border: 1px solid rgba(139, 126, 200, 0.22);
+                border-radius: 12px;
+            }
+        """)
+        card_layout = QVBoxLayout(self._profile_card)
+        card_layout.setContentsMargins(12, 12, 12, 12)
+        card_layout.setSpacing(9)
+
+        # Candidate Name Field
+        name_box_layout = QVBoxLayout()
+        name_box_layout.setSpacing(3)
+        name_lbl_title = QLabel("CANDIDATE NAME")
+        name_lbl_title.setStyleSheet("color: #8f96a8; font-size: 9px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.6px; border: none;")
         
-        self._threshold_lbl = QLabel("ATS MATCH THRESHOLD: 50%")
-        self._threshold_lbl.setStyleSheet("color: #5c6479; font-size: 11px; font-weight: bold; border: none; letter-spacing: 0.5px;")
+        name_frame = QFrame()
+        name_frame.setStyleSheet("background-color: rgba(244, 242, 251, 0.7); border: 1px solid rgba(139, 126, 200, 0.2); border-radius: 8px;")
+        name_frame_layout = QHBoxLayout(name_frame)
+        name_frame_layout.setContentsMargins(8, 5, 8, 5)
+        name_frame_layout.setSpacing(6)
+        
+        self._cand_name_val = QLabel("Vijay Kumar Srivastava")
+        self._cand_name_val.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        self._cand_name_val.setStyleSheet("color: #141c29; font-size: 12px; font-weight: 700; border: none; background: transparent;")
+        
+        self._cand_verified_badge = QLabel("Verified")
+        self._cand_verified_badge.setStyleSheet("""
+            color: #186a59;
+            background-color: #e1f5ef;
+            border: 1px solid rgba(120, 194, 173, 0.4);
+            border-radius: 6px;
+            padding: 2px 6px;
+            font-size: 9px;
+            font-weight: 700;
+            font-family: 'JetBrains Mono', Consolas, monospace;
+        """)
+        name_frame_layout.addWidget(self._cand_name_val, stretch=1)
+        name_frame_layout.addWidget(self._cand_verified_badge)
+        name_box_layout.addWidget(name_lbl_title)
+        name_box_layout.addWidget(name_frame)
+        card_layout.addLayout(name_box_layout)
+
+        # Target Role Field
+        role_box_layout = QVBoxLayout()
+        role_box_layout.setSpacing(3)
+        role_lbl_title = QLabel("TARGET ROLE")
+        role_lbl_title.setStyleSheet("color: #8f96a8; font-size: 9px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.6px; border: none;")
+        
+        role_frame = QFrame()
+        role_frame.setStyleSheet("background-color: rgba(244, 242, 251, 0.7); border: 1px solid rgba(139, 126, 200, 0.2); border-radius: 8px;")
+        role_frame_layout = QHBoxLayout(role_frame)
+        role_frame_layout.setContentsMargins(8, 5, 8, 5)
+        self._target_role_val = QLabel("Senior Software Engineer")
+        self._target_role_val.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        self._target_role_val.setStyleSheet("color: #141c29; font-size: 12px; font-weight: 700; border: none; background: transparent;")
+        role_frame_layout.addWidget(self._target_role_val)
+        role_box_layout.addWidget(role_lbl_title)
+        role_box_layout.addWidget(role_frame)
+        card_layout.addLayout(role_box_layout)
+
+        # Location Field
+        loc_box_layout = QVBoxLayout()
+        loc_box_layout.setSpacing(3)
+        loc_lbl_title = QLabel("LOCATION")
+        loc_lbl_title.setStyleSheet("color: #8f96a8; font-size: 9px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.6px; border: none;")
+        
+        loc_frame = QFrame()
+        loc_frame.setStyleSheet("background-color: rgba(244, 242, 251, 0.7); border: 1px solid rgba(139, 126, 200, 0.2); border-radius: 8px;")
+        loc_frame_layout = QHBoxLayout(loc_frame)
+        loc_frame_layout.setContentsMargins(8, 5, 8, 5)
+        loc_frame_layout.setSpacing(6)
+        loc_pin = QLabel("📍")
+        loc_pin.setStyleSheet("font-size: 11px; border: none; background: transparent;")
+        self._location_val = QLabel("Noida, Uttar Pradesh")
+        self._location_val.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        self._location_val.setStyleSheet("color: #141c29; font-size: 12px; font-weight: 600; border: none; background: transparent;")
+        loc_frame_layout.addWidget(loc_pin)
+        loc_frame_layout.addWidget(self._location_val, stretch=1)
+        loc_box_layout.addWidget(loc_lbl_title)
+        loc_box_layout.addWidget(loc_frame)
+        card_layout.addLayout(loc_box_layout)
+
+        # Experience & Work Mode (2 columns)
+        exp_mode_layout = QHBoxLayout()
+        exp_mode_layout.setSpacing(8)
+
+        exp_box = QVBoxLayout()
+        exp_box.setSpacing(3)
+        exp_lbl_title = QLabel("MIN EXPERIENCE")
+        exp_lbl_title.setStyleSheet("color: #8f96a8; font-size: 9px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.6px; border: none;")
+        exp_frame = QFrame()
+        exp_frame.setStyleSheet("background-color: rgba(244, 242, 251, 0.7); border: 1px solid rgba(139, 126, 200, 0.2); border-radius: 8px;")
+        exp_frame_layout = QHBoxLayout(exp_frame)
+        exp_frame_layout.setContentsMargins(8, 5, 8, 5)
+        self._exp_val = QLabel("5+ Years")
+        self._exp_val.setStyleSheet("color: #141c29; font-size: 12px; font-weight: 700; border: none; background: transparent;")
+        exp_frame_layout.addWidget(self._exp_val)
+        exp_box.addWidget(exp_lbl_title)
+        exp_box.addWidget(exp_frame)
+
+        mode_box = QVBoxLayout()
+        mode_box.setSpacing(3)
+        mode_lbl_title = QLabel("WORK MODE")
+        mode_lbl_title.setStyleSheet("color: #8f96a8; font-size: 9px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.6px; border: none;")
+        mode_frame = QFrame()
+        mode_frame.setStyleSheet("background-color: rgba(244, 242, 251, 0.7); border: 1px solid rgba(139, 126, 200, 0.2); border-radius: 8px;")
+        mode_frame_layout = QHBoxLayout(mode_frame)
+        mode_frame_layout.setContentsMargins(8, 5, 8, 5)
+        self._mode_val = QLabel("Hybrid / Remote")
+        self._mode_val.setStyleSheet("color: #141c29; font-size: 12px; font-weight: 700; border: none; background: transparent;")
+        mode_frame_layout.addWidget(self._mode_val)
+        mode_box.addWidget(mode_lbl_title)
+        mode_box.addWidget(mode_frame)
+
+        exp_mode_layout.addLayout(exp_box, 1)
+        exp_mode_layout.addLayout(mode_box, 1)
+        card_layout.addLayout(exp_mode_layout)
+
+        # Dynamic extra prefs area
+        self._extra_prefs_container = QWidget()
+        self._extra_prefs_container.setStyleSheet("background: transparent; border: none;")
+        self._extra_prefs_layout = QVBoxLayout(self._extra_prefs_container)
+        self._extra_prefs_layout.setContentsMargins(0, 0, 0, 0)
+        self._extra_prefs_layout.setSpacing(6)
+        card_layout.addWidget(self._extra_prefs_container)
+
+        # ATS Match Threshold (integrated in card)
+        sep = QFrame()
+        sep.setFrameShape(QFrame.Shape.HLine)
+        sep.setStyleSheet("background-color: rgba(139, 126, 200, 0.15); max-height: 1px; border: none;")
+        card_layout.addWidget(sep)
+
+        thresh_header = QHBoxLayout()
+        thresh_title = QLabel("ATS MATCH THRESHOLD")
+        thresh_title.setStyleSheet("color: #8f96a8; font-size: 9px; font-weight: 800; letter-spacing: 0.6px; border: none;")
+        self._threshold_pct_badge = QLabel("50%")
+        self._threshold_pct_badge.setStyleSheet("""
+            color: #5e5298;
+            background-color: #e8e4f7;
+            border: 1px solid rgba(139, 126, 200, 0.35);
+            border-radius: 10px;
+            padding: 2px 8px;
+            font-size: 11px;
+            font-weight: 700;
+            font-family: 'JetBrains Mono', Consolas, monospace;
+        """)
+        thresh_header.addWidget(thresh_title)
+        thresh_header.addStretch()
+        thresh_header.addWidget(self._threshold_pct_badge)
+        card_layout.addLayout(thresh_header)
+
         self._threshold_slider = QSlider(Qt.Orientation.Horizontal)
-        self._threshold_slider.setRange(5, 95)
+        self._threshold_slider.setRange(10, 95)
         self._threshold_slider.setSingleStep(5)
         self._threshold_slider.setPageStep(5)
-        self._threshold_slider.setTickInterval(5)
-        self._threshold_slider.setTickPosition(QSlider.TickPosition.TicksBelow)
         self._threshold_slider.setValue(50)
         self._threshold_slider.setStyleSheet("""
             QSlider::groove:horizontal {
@@ -510,67 +741,133 @@ class ProcessWorkspace(QWidget):
             }
         """)
         self._threshold_slider.valueChanged.connect(
-            lambda v: self._threshold_lbl.setText(f"ATS MATCH THRESHOLD: {v}%")
+            lambda v: self._threshold_pct_badge.setText(f"{v}%")
         )
-        sidebar_layout.addWidget(self._threshold_lbl)
-        sidebar_layout.addWidget(self._threshold_slider)
+        card_layout.addWidget(self._threshold_slider)
 
-        sidebar_layout.addStretch()
+        tick_lbl = QLabel("|    |    |    |    |    |    |    |    |    |")
+        tick_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        tick_lbl.setStyleSheet("color: #8f96a8; font-size: 7px; font-family: 'JetBrains Mono', Consolas, monospace; border: none; padding: 0;")
+        card_layout.addWidget(tick_lbl)
+
+        sidebar_layout.addWidget(self._profile_card)
+
+        # 3. Hunting Execution Action Buttons
+        exec_layout = QVBoxLayout()
+        exec_layout.setSpacing(7)
 
         self._toggle_btn = QPushButton("Start Job Hunt")
-        self._toggle_btn.setMinimumHeight(44)
+        self._toggle_btn.setMinimumHeight(40)
         self._toggle_btn.setStyleSheet("""
             QPushButton {
-                background-color: #5e5298; color: #ffffff; 
-                border-radius: 10px; font-size: 14px; font-weight: bold;
+                background-color: #8b7ec8; color: #ffffff;
+                border-radius: 11px; font-size: 11px; font-weight: 800;
+                letter-spacing: 0.8px; text-transform: uppercase;
                 border: none;
             }
-            QPushButton:hover { background-color: #493c81; }
-            QPushButton:disabled { background-color: #dbe3f5; color: #8f96a8; }
+            QPushButton:hover { background-color: #5e5298; }
+            QPushButton:disabled { background-color: #e8e4f7; color: #8f96a8; }
         """)
         self._toggle_btn.clicked.connect(self.toggle_job_hunt)
-        sidebar_layout.addWidget(self._toggle_btn)
+        exec_layout.addWidget(self._toggle_btn)
 
-        self._next_btn = QPushButton("⏭ Stop & Move to Next")
-        self._next_btn.setMinimumHeight(42)
+        self._next_btn = QPushButton("⏭ Move to Next Job")
+        self._next_btn.setMinimumHeight(40)
         self._next_btn.setStyleSheet("""
             QPushButton {
-                background-color: #fbbd9e; color: #5e2b10; 
-                border: 1px solid rgba(194, 94, 54, 0.35);
-                border-radius: 10px; font-size: 13px; font-weight: bold;
+                background-color: #fbbd9e; color: #5e2b10;
+                border: 1px solid rgba(194, 94, 54, 0.3);
+                border-radius: 11px; font-size: 11px; font-weight: 800;
+                letter-spacing: 0.8px; text-transform: uppercase;
             }
             QPushButton:hover { background-color: #f8ad8a; }
-            QPushButton:disabled { background-color: #f0f3ff; color: #8f96a8; border: 1px solid #dbe3f5; }
+            QPushButton:disabled { background-color: #fff0e8; color: #8f96a8; border: 1px solid rgba(194, 94, 54, 0.15); }
         """)
         self._next_btn.setEnabled(False)
         self._next_btn.clicked.connect(self.move_to_next_job)
-        sidebar_layout.addWidget(self._next_btn)
-        
-        self._reset_btn = QPushButton("Reset Browser")
-        self._reset_btn.setMinimumHeight(38)
+        exec_layout.addWidget(self._next_btn)
+
+        sec_grid = QHBoxLayout()
+        sec_grid.setSpacing(7)
+
+        self._reset_btn = QPushButton("🔄 Reset Browser")
+        self._reset_btn.setMinimumHeight(34)
         self._reset_btn.setStyleSheet("""
             QPushButton {
-                background-color: #ffffff; color: #5c6479; 
-                border: 1px solid rgba(139, 126, 200, 0.25); border-radius: 10px; 
-                font-size: 12px; font-weight: 600;
+                background-color: #ffffff; color: #5c6479;
+                border: 1px solid rgba(139, 126, 200, 0.25); border-radius: 10px;
+                font-size: 11px; font-weight: 600;
             }
-            QPushButton:hover { background-color: #f4f2fb; color: #5e5298; border-color: rgba(139, 126, 200, 0.45); }
+            QPushButton:hover { background-color: #f4f2fb; color: #5e5298; border-color: rgba(139, 126, 200, 0.4); }
         """)
         self._reset_btn.clicked.connect(self._reset_browser)
-        sidebar_layout.addWidget(self._reset_btn)
 
-        self._folder_btn = QPushButton("Open Outputs Folder")
-        self._folder_btn.setMinimumHeight(38)
+        self._folder_btn = QPushButton("📁 Outputs")
+        self._folder_btn.setMinimumHeight(34)
         self._folder_btn.setStyleSheet("""
             QPushButton {
-                background-color: #ffffff; color: #5c6479; 
-                border: 1px solid rgba(139, 126, 200, 0.25); border-radius: 10px; 
-                font-size: 12px; font-weight: 600;
+                background-color: #ffffff; color: #5c6479;
+                border: 1px solid rgba(139, 126, 200, 0.25); border-radius: 10px;
+                font-size: 11px; font-weight: 600;
             }
-            QPushButton:hover { background-color: #f4f2fb; color: #5e5298; border-color: rgba(139, 126, 200, 0.45); }
+            QPushButton:hover { background-color: #f4f2fb; color: #5e5298; border-color: rgba(139, 126, 200, 0.4); }
         """)
         self._folder_btn.clicked.connect(self._open_outputs_folder)
-        sidebar_layout.addWidget(self._folder_btn)
+
+        sec_grid.addWidget(self._reset_btn, 1)
+        sec_grid.addWidget(self._folder_btn, 1)
+        exec_layout.addLayout(sec_grid)
+        sidebar_layout.addLayout(exec_layout)
+
+        # 4. Hardware Telemetry Card
+        telemetry_card = QFrame()
+        telemetry_card.setStyleSheet("""
+            QFrame {
+                background-color: #ffffff;
+                border: 1px solid rgba(139, 126, 200, 0.2);
+                border-radius: 11px;
+            }
+        """)
+        telem_layout = QVBoxLayout(telemetry_card)
+        telem_layout.setContentsMargins(10, 8, 10, 8)
+        telem_layout.setSpacing(6)
+
+        telem_header = QHBoxLayout()
+        telem_header.setContentsMargins(0, 0, 0, 0)
+        telem_dot = QLabel("●")
+        telem_dot.setStyleSheet("color: #78c2ad; font-size: 9px; border: none; background: transparent;")
+        telem_title = QLabel("HARDWARE TELEMETRY")
+        telem_title.setStyleSheet("color: #5c6479; font-size: 9px; font-weight: 700; font-family: 'JetBrains Mono', Consolas, monospace; border: none; background: transparent;")
+        telem_header.addWidget(telem_dot)
+        telem_header.addWidget(telem_title)
+        telem_header.addStretch()
+
+        self._telemetry_spec_lbl = QLabel("Local AI Engine")
+        self._telemetry_spec_lbl.setStyleSheet("color: #8f96a8; font-size: 9px; font-family: 'JetBrains Mono', Consolas, monospace; border: none; background: transparent;")
+        telem_header.addWidget(self._telemetry_spec_lbl)
+        telem_layout.addLayout(telem_header)
+
+        # 2x2 Grid of Gauges
+        telem_grid = QGridLayout()
+        telem_grid.setContentsMargins(0, 0, 0, 0)
+        telem_grid.setHorizontalSpacing(10)
+        telem_grid.setVerticalSpacing(4)
+
+        self._side_cpu = SidebarMetricWidget("CPU", color="#3b82f6", track_color="#e0f2fe")
+        self._side_ram = SidebarMetricWidget("RAM", color="#c25e36", track_color="#fff0e8")
+        self._side_gpu = SidebarMetricWidget("GPU", color="#186a59", track_color="#e1f5ef")
+        self._side_vram = SidebarMetricWidget("VRAM", color="#8e4555", track_color="#ffdad6")
+
+        telem_grid.addWidget(self._side_cpu, 0, 0)
+        telem_grid.addWidget(self._side_ram, 0, 1)
+        telem_grid.addWidget(self._side_gpu, 1, 0)
+        telem_grid.addWidget(self._side_vram, 1, 1)
+        telem_layout.addLayout(telem_grid)
+
+        sidebar_layout.addWidget(telemetry_card)
+        sidebar_layout.addStretch()
+
+        sidebar_scroll.setWidget(sidebar)
 
         # -- RIGHT MAIN AREA (Chat/Feed) --
         main_area = QWidget()
@@ -657,10 +954,10 @@ class ProcessWorkspace(QWidget):
         main_area_layout.addWidget(chat_frame)
 
         # Add to splitter
-        splitter.addWidget(sidebar)
+        splitter.addWidget(sidebar_scroll)
         splitter.addWidget(main_area)
-        splitter.setStretchFactor(0, 1)
-        splitter.setStretchFactor(1, 3)
+        splitter.setStretchFactor(0, 0)
+        splitter.setStretchFactor(1, 1)
 
         main_layout.addWidget(splitter)
         self.refresh_preferences()
@@ -670,52 +967,100 @@ class ProcessWorkspace(QWidget):
         super().showEvent(event)
         self.refresh_preferences()
 
+    def update_telemetry(self, cpu: float, ram: float, gpu: float, vram: float) -> None:
+        """Update hardware telemetry gauges in the sidebar."""
+        self._side_cpu.set_value(cpu)
+        self._side_ram.set_value(ram)
+        self._side_gpu.set_value(gpu)
+        self._side_vram.set_value(vram)
+
+    def set_telemetry_model(self, model_name: str) -> None:
+        """Update the telemetry model label in the sidebar."""
+        clean_name = model_name.removesuffix(":latest")
+        if len(clean_name) > 18:
+            clean_name = clean_name[:16] + ".."
+        self._telemetry_spec_lbl.setText(clean_name)
+
     def refresh_preferences(self) -> None:
-        """Load preferences from SQLite and display them in the sidebar."""
-        # Clear existing
-        while self._pref_layout.count():
-            child = self._pref_layout.takeAt(0)
+        """Load preferences from SQLite and display them in the unified Target Profile card."""
+        # Clear extra dynamic prefs
+        while self._extra_prefs_layout.count():
+            child = self._extra_prefs_layout.takeAt(0)
             if child is not None:
                 widget = child.widget()
                 if widget is not None:
+                    widget.setParent(None)
                     widget.deleteLater()
 
         try:
             import json
             active_resume = self._runtime.plugins._context.documents.get_active_structured_resume()
             if not active_resume:
+                self._cand_name_val.setText("No Active Profile")
+                self._cand_verified_badge.setText("Unset")
+                self._cand_verified_badge.setStyleSheet("color: #8e4555; background-color: #ffdad6; border: 1px solid rgba(142, 69, 85, 0.4); border-radius: 6px; padding: 2px 6px; font-size: 9px; font-weight: 700; font-family: 'JetBrains Mono', Consolas, monospace;")
+                self._target_role_val.setText("Set up profile in Setup tab")
+                self._location_val.setText("Remote")
+                self._exp_val.setText("0+ Years")
+                self._mode_val.setText("Remote")
+                self._config_badge.setText("Config #0000")
                 return
-            
+
             parsed = json.loads(active_resume.parsed_json)
             if isinstance(parsed, dict) and "preferences" in parsed:
                 prefs = parsed["preferences"]
             else:
-                # Fallback to global DB preferences for older parses
                 prefs = {p.key: p.value for p in self._runtime.plugins._context.documents.get_preferences()}
+
+            cand_name = prefs.get("Candidate Name", active_resume.name or "Vijay Kumar Srivastava")
+            target_role = prefs.get("Target Role", "Senior Software Engineer")
+            location = prefs.get("Location", "Noida, Uttar Pradesh")
+            min_exp = prefs.get("Min Years Exp", "5+ Years")
+            work_mode = prefs.get("Work Mode", "Hybrid / Remote")
+
+            self._cand_name_val.setText(cand_name)
+            self._cand_verified_badge.setText("Verified")
+            self._cand_verified_badge.setStyleSheet("""
+                color: #186a59;
+                background-color: #e1f5ef;
+                border: 1px solid rgba(120, 194, 173, 0.4);
+                border-radius: 6px;
+                padding: 2px 6px;
+                font-size: 9px;
+                font-weight: 700;
+                font-family: 'JetBrains Mono', Consolas, monospace;
+            """)
+
+            self._target_role_val.setText(target_role)
+            self._location_val.setText(location)
+            self._exp_val.setText(min_exp if ("Year" in min_exp or "+" in min_exp) else f"{min_exp} Years")
+            self._mode_val.setText(work_mode)
+            self._config_badge.setText(f"Config #{str(active_resume.id)[:4]}")
+
+            # Display any other additional preferences (e.g. Target Salary, Primary Skills)
+            known_keys = {"Candidate Name", "Target Role", "Location", "Min Years Exp", "Work Mode"}
+            extra_keys = [k for k in prefs.keys() if k not in known_keys]
+            for k in extra_keys[:3]: # Keep compact
+                v = prefs[k]
+                extra_box = QVBoxLayout()
+                extra_box.setSpacing(2)
+                extra_lbl = QLabel(k.upper())
+                extra_lbl.setStyleSheet("color: #8f96a8; font-size: 9px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.6px; border: none;")
+                extra_frame = QFrame()
+                extra_frame.setStyleSheet("background-color: rgba(244, 242, 251, 0.7); border: 1px solid rgba(139, 126, 200, 0.2); border-radius: 8px;")
+                extra_flayout = QHBoxLayout(extra_frame)
+                extra_flayout.setContentsMargins(8, 4, 8, 4)
+                extra_val = QLabel(v)
+                extra_val.setStyleSheet("color: #141c29; font-size: 11px; font-weight: 600; border: none; background: transparent;")
+                extra_flayout.addWidget(extra_val)
+                extra_box.addWidget(extra_lbl)
+                extra_box.addWidget(extra_frame)
                 
-            for k, v in prefs.items():
-                card = QFrame()
-                card.setStyleSheet("""
-                    QFrame {
-                        background-color: #ffffff;
-                        border: 1px solid rgba(139, 126, 200, 0.2);
-                        border-radius: 10px;
-                        padding: 10px;
-                    }
-                """)
-                card_layout = QVBoxLayout(card)
-                card_layout.setContentsMargins(0,0,0,0)
-                card_layout.setSpacing(3)
-                
-                k_lbl = QLabel(k.upper())
-                k_lbl.setStyleSheet("color: #8f96a8; font-size: 10px; font-weight: bold; font-family: 'JetBrains Mono', monospace; border: none; letter-spacing: 0.5px;")
-                v_lbl = QLabel(v)
-                v_lbl.setWordWrap(True)
-                v_lbl.setStyleSheet("color: #141c29; font-size: 13px; font-weight: 600; border: none;")
-                
-                card_layout.addWidget(k_lbl)
-                card_layout.addWidget(v_lbl)
-                self._pref_layout.addWidget(card)
+                holder = QWidget()
+                holder.setStyleSheet("background: transparent; border: none;")
+                holder.setLayout(extra_box)
+                self._extra_prefs_layout.addWidget(holder)
+
         except (AttributeError, LookupError, json.JSONDecodeError):
             return
 
@@ -1206,21 +1551,24 @@ class ProcessWorkspace(QWidget):
             
             self.window().setGeometry(avail_geo.x(), y_pos, w, h)
 
-            self._toggle_btn.setText("⏹ Stop Hunt")
+            self._toggle_btn.setText("⏹ Stop Hunt Execution")
             self._toggle_btn.setStyleSheet("""
                 QPushButton {
-                    background-color: #ffdad6;
+                    background-color: #f4a8b8;
                     color: #591b28;
-                    border: 1px solid rgba(142, 69, 85, 0.35);
-                    border-radius: 10px;
-                    font-size: 15px;
-                    font-weight: bold;
+                    border: 1px solid rgba(142, 69, 85, 0.25);
+                    border-radius: 11px;
+                    font-size: 11px;
+                    font-weight: 800;
+                    letter-spacing: 0.8px;
+                    text-transform: uppercase;
+                    padding: 10px 0;
                 }
-                QPushButton:hover { background-color: #f4a8b8; }
+                QPushButton:hover { background-color: #ee95a8; }
                 QPushButton:disabled { background-color: #f7f8fc; color: #8f96a8; }
             """)
             self._next_btn.setEnabled(True)
-            self._next_btn.setText("⏭ Stop & Move to Next")
+            self._next_btn.setText("⏭ Move to Next Job")
             self.add_agent_message(f"Beginning automated job hunt for '{role}' in '{location}'...")
             
             threshold = self._threshold_slider.value()
@@ -1254,14 +1602,14 @@ class ProcessWorkspace(QWidget):
 
     def move_to_next_job(self) -> None:
         if self._hunt_worker and self._hunt_worker.isRunning():
-            self.add_agent_message("⏭ Stop & Move to Next triggered. Advancing...")
+            self.add_agent_message("⏭ Move to Next Job triggered. Advancing...")
             self._hunt_worker.move_to_next()
-            self._next_btn.setText("⏭ Stop & Move to Next")
+            self._next_btn.setText("⏭ Move to Next Job")
         else:
             self.add_agent_message("No active job hunt in progress to advance.")
 
     def _on_job_evaluating(self, job_title: str) -> None:
-        self._next_btn.setText("⏭ Stop & Move to Next")
+        self._next_btn.setText("⏭ Move to Next Job")
         self._next_btn.setEnabled(True)
 
     def _on_hunt_finished(self) -> None:
@@ -1272,15 +1620,18 @@ class ProcessWorkspace(QWidget):
                 background-color: #8b7ec8;
                 color: #ffffff;
                 border: none;
-                border-radius: 10px;
-                font-size: 15px;
-                font-weight: bold;
+                border-radius: 11px;
+                font-size: 11px;
+                font-weight: 800;
+                letter-spacing: 0.8px;
+                text-transform: uppercase;
+                padding: 10px 0;
             }
             QPushButton:hover { background-color: #5e5298; }
             QPushButton:disabled { background-color: #e8e4f7; color: #8f96a8; }
         """)
         self._next_btn.setEnabled(False)
-        self._next_btn.setText("⏭ Stop & Move to Next")
+        self._next_btn.setText("⏭ Move to Next Job")
         if self._hunt_worker:
             self._hunt_worker.deleteLater()
             self._hunt_worker = None
@@ -1326,15 +1677,19 @@ class ProcessWorkspace(QWidget):
                 background-color: #8b7ec8;
                 color: #ffffff;
                 border: none;
-                border-radius: 10px;
-                font-size: 15px;
-                font-weight: bold;
+                border-radius: 11px;
+                font-size: 11px;
+                font-weight: 800;
+                letter-spacing: 0.8px;
+                text-transform: uppercase;
+                padding: 10px 0;
             }
             QPushButton:hover { background-color: #5e5298; }
             QPushButton:disabled { background-color: #e8e4f7; color: #8f96a8; }
         """)
         self._next_btn.setEnabled(False)
-        self._next_btn.setText("⏭ Stop & Move to Next")
+        self._next_btn.setText("⏭ Move to Next Job")
+        self.add_agent_message(f"Job workflow failed: {message}")
         self.add_agent_message(f"Job workflow failed: {message}")
 
     def _open_for_review(self, job_id: str) -> None:
