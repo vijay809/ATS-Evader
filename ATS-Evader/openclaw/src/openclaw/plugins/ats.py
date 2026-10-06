@@ -22,6 +22,9 @@ class AtsAnalysis(BaseModel):
     missing_keywords: list[str]
     recommendations: list[str]
     summary: str
+    unsupported_details: list[str] = Field(default_factory=list)
+    missing_core_skills: list[str] = Field(default_factory=list)
+    formatting_risks: list[str] = Field(default_factory=list)
 
 
 class EligibilityFacts(BaseModel):
@@ -145,7 +148,7 @@ Job description:
 
     @staticmethod
     def _build_prompt(resume: str, job_description: str) -> str:
-        return f"""Compare the candidate's resume against the job description with calibrated scoring:
+        return f"""Compare the candidate's resume against the job description with calibrated scoring and a thorough Gap & Flag audit:
 
 EVALUATION WEIGHTS:
 1. Role & Seniority Match (30%): If the seniority level clashes (e.g., Senior applying for Junior/Intern or vice versa), cap total score at 20% max regardless of skill overlap.
@@ -153,11 +156,19 @@ EVALUATION WEIGHTS:
 3. Domain & Functional Experience (20%): Relevance of industry background and problem domain.
 4. Education, Certifications & Credentials (10%).
 
+GAP & FLAG AUDIT DIRECTIVES:
+- missing_core_skills: Hard technical skills, frameworks, languages, or tools strictly required in the JD that the candidate does not appear to have in the resume (e.g. ['Blazor', 'C#', '.NET Core']).
+- unsupported_details: Qualifications, domain specializations, years of experience, or responsibilities demanded by the JD that the candidate's resume cannot substantiate or verify (e.g. ['Requires 5+ years in Healthcare domain', 'Requires cloud microservice ownership']).
+- formatting_risks: Potential ATS parsing vulnerabilities, missing standard skill synonyms/acronyms, or structural formatting risks that might cause automated rejection.
+
 Return ONLY valid JSON with this exact schema:
 {{
   "match_score": integer from 0 to 100,
   "matched_keywords": [string],
   "missing_keywords": [string],
+  "missing_core_skills": [string],
+  "unsupported_details": [string],
+  "formatting_risks": [string],
   "recommendations": [string],
   "summary": string
 }}

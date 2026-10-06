@@ -32,6 +32,7 @@ if TYPE_CHECKING:
 
 class JobHuntWorker(QThread):
     job_found = Signal(object) # Will emit ImportedJob
+    job_evaluating = Signal(str)
     agent_message = Signal(str)
     error = Signal(str)
 
@@ -49,6 +50,17 @@ class JobHuntWorker(QThread):
         self.win_y = win_y
         self.win_w = win_w
         self.win_h = win_h
+        self._skip_current_job = False
+        self._stop_requested = False
+        self._waiting_for_user = False
+
+    def stop(self) -> None:
+        self._stop_requested = True
+        self.requestInterruption()
+
+    def move_to_next(self) -> None:
+        self._skip_current_job = True
+        self._waiting_for_user = False
 
     def run(self) -> None:
         try:
@@ -58,9 +70,9 @@ class JobHuntWorker(QThread):
 
     async def do_hunt(self) -> None:
         try:
-            self.agent_message.emit(f"Launching browser to search for '{self.role}' in '{self.location}' (Single-job test mode)...")
+            self.agent_message.emit(f"Launching browser to search for '{self.role}' in '{self.location}'...")
             links = await self.browser.search_naukri_jobs(
-                self.role, self.location, max_results=1,
+                self.role, self.location, max_results=20,
                 win_x=self.win_x, win_y=self.win_y, win_w=self.win_w, win_h=self.win_h
             )
             
@@ -68,57 +80,137 @@ class JobHuntWorker(QThread):
                 self.agent_message.emit("No matching jobs found on the current page.")
                 return
                 
-            self.agent_message.emit("Found matching job link. Parsing single job for testing...")
+            self.agent_message.emit(f"Found {len(links)} matching job links. Starting automated review...")
             
-            for i, link in enumerate(links[:1]):
-                if self.isInterruptionRequested():
+            import logging
+            logger = logging.getLogger("process_workspace")
+
+            for i, link in enumerate(links):
+                if self.isInterruptionRequested() or self._stop_requested:
                     self.agent_message.emit("Job Hunt was stopped by the user.")
                     break
                     
+                self._skip_current_job = False
+
                 if not self.browser.page or self.browser.page.is_closed():
                     raise RuntimeError("Browser was closed by the user.")
                     
-                jd = await self.browser.extract_naukri_jd(link)
-                if not jd['description']:
+                self.agent_message.emit(f"[{i+1}/{len(links)}] Fetching job posting...")
+                self.job_evaluating.emit(f"Job {i+1}/{len(links)}")
+
+                # Extract JD
+                jd_task = asyncio.create_task(self.browser.extract_naukri_jd(link))
+                while not jd_task.done():
+                    if self.isInterruptionRequested() or self._stop_requested:
+                        jd_task.cancel()
+                        break
+                    if self._skip_current_job:
+                        jd_task.cancel()
+                        break
+                    if not self.browser.page or self.browser.page.is_closed():
+                        jd_task.cancel()
+                        raise RuntimeError("Browser was closed by the user.")
+                    await asyncio.sleep(0.2)
+
+                if self.isInterruptionRequested() or self._stop_requested:
+                    self.agent_message.emit("Job Hunt was stopped by the user.")
+                    break
+
+                if self._skip_current_job:
+                    self._skip_current_job = False
+                    self.agent_message.emit(f"⏭ Skipped job [{i+1}/{len(links)}] - moving to next...")
+                    continue
+
+                try:
+                    jd = jd_task.result()
+                except Exception as e:
+                    self.agent_message.emit(f"Could not extract posting: {e}")
+                    continue
+
+                if not jd or not jd.get('description'):
                     continue
                     
-                if not self.browser.page or self.browser.page.is_closed():
-                    raise RuntimeError("Browser was closed by the user.")
+                title = jd.get('title', 'Unknown Title')
+                company = jd.get('company', 'Unknown Company')
                 
-                import logging
-                logger = logging.getLogger("process_workspace")
-                logger.info(f"Extracting eligibility facts for: {jd['title']} at {jd['company']}")
+                logger.info(f"Extracting eligibility facts for: {title} at {company}")
                 
+                # Eligibility facts check
+                facts_task = asyncio.create_task(self.analyzer.check_eligibility(jd['description']))
+                while not facts_task.done():
+                    if self.isInterruptionRequested() or self._stop_requested:
+                        facts_task.cancel()
+                        break
+                    if self._skip_current_job:
+                        facts_task.cancel()
+                        break
+                    if not self.browser.page or self.browser.page.is_closed():
+                        facts_task.cancel()
+                        raise RuntimeError("Browser was closed by the user.")
+                    await asyncio.sleep(0.2)
+
+                if self.isInterruptionRequested() or self._stop_requested:
+                    self.agent_message.emit("Job Hunt was stopped by the user.")
+                    break
+
+                if self._skip_current_job:
+                    self._skip_current_job = False
+                    self.agent_message.emit(f"⏭ Stopped evaluating '{title}' - moving to next...")
+                    continue
+
                 try:
-                    facts = await self.analyzer.check_eligibility(jd['description'])
+                    facts = facts_task.result()
                 except Exception as e:
                     logger.error(f"Eligibility extraction failed: {e}")
                     facts = None
                     
                 if facts:
                     if facts.min_years_experience is not None and facts.min_years_experience > self.min_exp:
-                        skip_msg = f"Skipping '{jd['title']}' - Requires {facts.min_years_experience} years exp (You have {self.min_exp})."
+                        skip_msg = f"Skipping '{title}' - Requires {facts.min_years_experience} years exp (You have {self.min_exp})."
                         self.agent_message.emit(skip_msg)
                         logger.info(skip_msg)
                         continue
                         
                     if facts.location_type and facts.location_type.lower() != "remote" and self.location.lower() == "remote":
-                        skip_msg = f"Skipping '{jd['title']}' - It is {facts.location_type} but you require Remote."
+                        skip_msg = f"Skipping '{title}' - It is {facts.location_type} but you require Remote."
                         self.agent_message.emit(skip_msg)
                         logger.info(skip_msg)
                         continue
                         
-                self.agent_message.emit(f"[{i+1}/{len(links)}] Scoring: {jd['title']} at {jd['company']}...")
+                self.agent_message.emit(f"[{i+1}/{len(links)}] Scoring: '{title}' at {company}...")
                 
-                # Poll browser state while LLM analyzes
+                # Poll LLM analysis
                 analysis_task = asyncio.create_task(self.analyzer.analyze(self.active_resume, jd['description']))
                 while not analysis_task.done():
+                    if self.isInterruptionRequested() or self._stop_requested:
+                        analysis_task.cancel()
+                        break
+                    if self._skip_current_job:
+                        analysis_task.cancel()
+                        break
                     if not self.browser.page or self.browser.page.is_closed():
                         analysis_task.cancel()
                         raise RuntimeError("Browser was closed by the user.")
-                    await asyncio.sleep(1)
-                    
-                analysis = analysis_task.result()
+                    await asyncio.sleep(0.2)
+
+                if self.isInterruptionRequested() or self._stop_requested:
+                    self.agent_message.emit("Job Hunt was stopped by the user.")
+                    break
+
+                if self._skip_current_job:
+                    self._skip_current_job = False
+                    self.agent_message.emit(f"⏭ Stopped scoring '{title}' - moving to next...")
+                    continue
+
+                try:
+                    analysis = analysis_task.result()
+                except Exception as e:
+                    self.agent_message.emit(f"Analysis failed for '{title}': {e}")
+                    continue
+                
+                unsupported = list(analysis.unsupported_details)
+                missing_skills = list(analysis.missing_core_skills)
+                formatting = list(analysis.formatting_risks)
                 
                 status = "Analyzed"
                 job_pdf_path: str | None = None
@@ -128,43 +220,78 @@ class JobHuntWorker(QThread):
                     logger.info(msg)
                     tailor_task = asyncio.create_task(self.analyzer.tailor(self.active_resume, jd['description']))
                     while not tailor_task.done():
+                        if self.isInterruptionRequested() or self._stop_requested:
+                            tailor_task.cancel()
+                            break
+                        if self._skip_current_job:
+                            tailor_task.cancel()
+                            break
                         if not self.browser.page or self.browser.page.is_closed():
                             tailor_task.cancel()
                             raise RuntimeError("Browser was closed by the user.")
-                        await asyncio.sleep(1)
-                        
-                    tailored = tailor_task.result()
-                    
-                    msg = "CV Tailored! Generating executive PDF..."
-                    self.agent_message.emit(msg)
-                    logger.info(msg)
-                    
-                    import uuid
+                        await asyncio.sleep(0.2)
 
-                    from openclaw.core.pdf_gen import PdfGenerator
-                    
-                    job_id = str(uuid.uuid4())
-                    pdf_path = os.path.join(os.getcwd(), "outputs", "resumes", f"cv_{job_id[:8]}.pdf")
-                    pdf_path = await PdfGenerator.markdown_to_pdf(tailored.tailored_resume, pdf_path)
-                    job_pdf_path = pdf_path
-                    
-                    msg1 = f"PDF Generated at: {pdf_path}"
-                    self.agent_message.emit(msg1)
-                    logger.info(msg1)
-                    
-                    status = "Ready to Apply"
-                    msg_ready = f"Match meets threshold ({analysis.match_score}%)! Tailored CV prepared and staged for your review."
-                    self.agent_message.emit(msg_ready)
-                    logger.info(msg_ready)
+                    if self.isInterruptionRequested() or self._stop_requested:
+                        self.agent_message.emit("Job Hunt was stopped by the user.")
+                        break
+
+                    if self._skip_current_job:
+                        self._skip_current_job = False
+                        self.agent_message.emit(f"⏭ Stopped tailoring '{title}' - moving to next...")
+                        continue
+
+                    try:
+                        tailored = tailor_task.result()
+                        if tailored.warnings:
+                            for w in tailored.warnings:
+                                if w not in unsupported:
+                                    unsupported.append(w)
+                        
+                        msg = "CV Tailored! Generating executive PDF..."
+                        self.agent_message.emit(msg)
+                        logger.info(msg)
+                        
+                        import uuid
+                        from openclaw.core.pdf_gen import PdfGenerator
+                        
+                        job_id = str(uuid.uuid4())
+                        pdf_path = os.path.join(os.getcwd(), "outputs", "resumes", f"cv_{job_id[:8]}.pdf")
+                        pdf_path = await PdfGenerator.markdown_to_pdf(tailored.tailored_resume, pdf_path)
+                        job_pdf_path = pdf_path
+                        
+                        msg1 = f"PDF Generated at: {pdf_path}"
+                        self.agent_message.emit(msg1)
+                        logger.info(msg1)
+                        
+                        status = "Ready to Apply"
+                        msg_ready = f"Match meets threshold ({analysis.match_score}%)! Tailored CV prepared and staged for your review."
+                        self.agent_message.emit(msg_ready)
+                        logger.info(msg_ready)
+                    except Exception as e:
+                        self.agent_message.emit(f"Tailoring error: {e}")
                 else:
-                    msg = f"Skipping '{jd['title']}' - Score {analysis.match_score}% is below {self.threshold}% threshold."
+                    msg = f"Skipping '{title}' - Score {analysis.match_score}% is below {self.threshold}% threshold."
                     self.agent_message.emit(msg)
                     logger.info(msg)
                     status = "Skipped"
+
+                # Live Gap & Flag feed alert
+                gap_alerts = []
+                if missing_skills:
+                    gap_alerts.append(f"❌ Missing Core Skills: {', '.join(missing_skills)}")
+                if unsupported:
+                    gap_alerts.append(f"⚠️ Unsupported Requirements: {'; '.join(unsupported[:2])}")
+                if formatting:
+                    gap_alerts.append(f"🚩 ATS/Formatting Risks: {'; '.join(formatting[:2])}")
+
+                if gap_alerts:
+                    self.agent_message.emit(f"📋 **Gap & Flag Alert for '{title}':**\n" + "\n".join(gap_alerts))
+                else:
+                    self.agent_message.emit(f"✅ **Gap & Flag Audit:** Zero critical skill gaps or formatting risks detected.")
                 
                 job = ImportedJob(
-                    jd['title'],
-                    jd['company'],
+                    title,
+                    company,
                     jd['description'],
                     link,
                     analysis.match_score,
@@ -172,11 +299,29 @@ class JobHuntWorker(QThread):
                     analysis.recommendations,
                     status=status,
                     pdf_path=job_pdf_path,
+                    unsupported_details=unsupported,
+                    missing_core_skills=missing_skills,
+                    formatting_risks=formatting,
                 )
                 self.job_found.emit(job)
-                self.agent_message.emit("Test limit reached: 1 job processed.")
-                break
-                
+
+                # Pause between jobs to allow the user to review the job, cover letter, or CV
+                if i + 1 < len(links):
+                    self.agent_message.emit(f"📋 **Job [{i+1}/{len(links)}] staged.** Click **'Move to Next Job'** (or **'Stop & Move to Next'**) to evaluate the next posting, or **'Stop Hunt'** to exit.")
+                    self._waiting_for_user = True
+                    while self._waiting_for_user:
+                        if self.isInterruptionRequested() or self._stop_requested:
+                            break
+                        if self._skip_current_job:
+                            self._skip_current_job = False
+                            self._waiting_for_user = False
+                            break
+                        await asyncio.sleep(0.2)
+
+                    if self.isInterruptionRequested() or self._stop_requested:
+                        self.agent_message.emit("Job Hunt was stopped by the user.")
+                        break
+                    
             self.agent_message.emit("Automated search complete. Awaiting further instructions.")
                 
         except asyncio.CancelledError:
@@ -345,10 +490,25 @@ class ProcessWorkspace(QWidget):
                 background-color: #adc6ff; color: #002e69; 
                 border-radius: 8px; font-size: 16px; font-weight: bold;
             }
+            QPushButton:hover { background-color: #cfdcff; }
             QPushButton:disabled { background-color: #555; color: #aaa; }
         """)
         self._toggle_btn.clicked.connect(self.toggle_job_hunt)
         sidebar_layout.addWidget(self._toggle_btn)
+
+        self._next_btn = QPushButton("⏭ Stop & Move to Next")
+        self._next_btn.setMinimumHeight(44)
+        self._next_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #f59e0b; color: #1c1917; 
+                border-radius: 8px; font-size: 14px; font-weight: bold;
+            }
+            QPushButton:hover { background-color: #fbbf24; }
+            QPushButton:disabled { background-color: #2a2a2a; color: #555555; border: 1px solid #3d3d3d; }
+        """)
+        self._next_btn.setEnabled(False)
+        self._next_btn.clicked.connect(self.move_to_next_job)
+        sidebar_layout.addWidget(self._next_btn)
         
         self._reset_btn = QPushButton("Reset Browser")
         self._reset_btn.setMinimumHeight(40)
@@ -506,6 +666,16 @@ class ProcessWorkspace(QWidget):
         self._chat_input.clear()
         self.add_user_message(text)
 
+        lowered = text.lower()
+        if lowered in ("next", "next job", "move to next", "skip to next", "skip"):
+            if self._hunt_worker and self._hunt_worker.isRunning():
+                self.move_to_next_job()
+                return
+        if lowered in ("stop", "stop hunt", "cancel", "halt"):
+            if self._hunt_worker and self._hunt_worker.isRunning():
+                self.stop_job_hunt()
+                return
+
         try:
             from openclaw.plugins.semantic_navigator import SemanticNavigator
             nav_service = self._runtime.services.get("browser.navigator")
@@ -531,6 +701,9 @@ class ProcessWorkspace(QWidget):
         analysis: list[str],
         job_id: str,
         pdf_path: str | None = None,
+        unsupported_details: list[str] | None = None,
+        missing_core_skills: list[str] | None = None,
+        formatting_risks: list[str] | None = None,
     ) -> None:
         """Adds a job match card to the feed."""
         card = QFrame()
@@ -551,13 +724,65 @@ class ProcessWorkspace(QWidget):
         header_layout.addWidget(score_lbl)
         layout.addLayout(header_layout)
 
-        # Analysis
+        # Analysis Summary
         for point in analysis:
             p_lbl = QLabel(f"• {point}")
             p_lbl.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
             p_lbl.setWordWrap(True)
             p_lbl.setStyleSheet("color: #c1c6d7; font-size: 14px; border: none;")
             layout.addWidget(p_lbl)
+
+        # Gap & Flag Report
+        has_gaps = bool(missing_core_skills or unsupported_details or formatting_risks)
+        if has_gaps:
+            gap_frame = QFrame()
+            gap_frame.setStyleSheet("""
+                QFrame {
+                    background-color: rgba(30, 20, 20, 0.6);
+                    border: 1px solid rgba(255, 180, 171, 0.35);
+                    border-radius: 8px;
+                    padding: 8px;
+                    margin-top: 6px;
+                    margin-bottom: 6px;
+                }
+            """)
+            gap_layout = QVBoxLayout(gap_frame)
+            gap_layout.setContentsMargins(10, 8, 10, 8)
+            gap_layout.setSpacing(5)
+
+            gap_header = QLabel("⚠️ GAP & FLAG REPORT")
+            gap_header.setStyleSheet("color: #ffb4ab; font-size: 12px; font-weight: bold; border: none; letter-spacing: 0.5px;")
+            gap_layout.addWidget(gap_header)
+
+            if missing_core_skills:
+                skills_str = ", ".join(missing_core_skills)
+                skills_lbl = QLabel(f"❌ <b>Missing Core Skills:</b> <span style='color: #ffadc6;'>{skills_str}</span>")
+                skills_lbl.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+                skills_lbl.setWordWrap(True)
+                skills_lbl.setStyleSheet("color: #e5e2e1; font-size: 13px; border: none;")
+                gap_layout.addWidget(skills_lbl)
+
+            if unsupported_details:
+                for item in unsupported_details:
+                    unsup_lbl = QLabel(f"⚠️ <b>Unsupported Requirement:</b> {item}")
+                    unsup_lbl.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+                    unsup_lbl.setWordWrap(True)
+                    unsup_lbl.setStyleSheet("color: #ffb595; font-size: 13px; border: none;")
+                    gap_layout.addWidget(unsup_lbl)
+
+            if formatting_risks:
+                for item in formatting_risks:
+                    risk_lbl = QLabel(f"🚩 <b>ATS / Formatting Risk:</b> {item}")
+                    risk_lbl.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+                    risk_lbl.setWordWrap(True)
+                    risk_lbl.setStyleSheet("color: #e0c48c; font-size: 13px; border: none;")
+                    gap_layout.addWidget(risk_lbl)
+
+            layout.addWidget(gap_frame)
+        else:
+            clean_badge = QLabel("✓ Zero Critical Gaps or Formatting Risks Detected")
+            clean_badge.setStyleSheet("color: #a5d6a7; font-size: 12px; font-weight: bold; padding: 4px 0; border: none;")
+            layout.addWidget(clean_badge)
 
         # Actions
         actions_layout = QHBoxLayout()
@@ -614,6 +839,24 @@ class ProcessWorkspace(QWidget):
 
         actions_layout.addWidget(cover_letter_btn)
         actions_layout.addWidget(tailor_cv_btn)
+
+        next_job_btn = QPushButton("⏭ Move to Next")
+        next_job_btn.setMinimumHeight(40)
+        next_job_btn.setStyleSheet("""
+            QPushButton {
+                background-color: rgba(245, 158, 11, 0.15); 
+                color: #f59e0b; 
+                border: 1px solid rgba(245, 158, 11, 0.4); 
+                border-radius: 6px; 
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: rgba(245, 158, 11, 0.3);
+            }
+        """)
+        next_job_btn.clicked.connect(self.move_to_next_job)
+        actions_layout.addWidget(next_job_btn)
+
         actions_layout.addWidget(skip_btn)
         layout.addLayout(actions_layout)
 
@@ -723,13 +966,17 @@ class ProcessWorkspace(QWidget):
             
             self.window().setGeometry(avail_geo.x(), y_pos, w, h)
 
-            self._toggle_btn.setText("Stop Hunt")
+            self._toggle_btn.setText("⏹ Stop Hunt")
             self._toggle_btn.setStyleSheet("""
                 QPushButton {
                     background-color: #690000; color: #ffadc6; 
                     border-radius: 8px; font-size: 16px; font-weight: bold;
                 }
+                QPushButton:hover { background-color: #850000; }
+                QPushButton:disabled { background-color: #444; color: #888; }
             """)
+            self._next_btn.setEnabled(True)
+            self._next_btn.setText("⏭ Stop & Move to Next")
             self.add_agent_message(f"Beginning automated job hunt for '{role}' in '{location}'...")
             
             threshold = self._threshold_slider.value()
@@ -738,6 +985,7 @@ class ProcessWorkspace(QWidget):
                 win_x=avail_geo.x() + w, win_y=y_pos, win_w=w, win_h=h, threshold=threshold
             )
             self._hunt_worker.agent_message.connect(self.add_agent_message)
+            self._hunt_worker.job_evaluating.connect(self._on_job_evaluating)
             self._hunt_worker.job_found.connect(self._on_job_imported)
             self._hunt_worker.error.connect(self._on_worker_failed)
             self._hunt_worker.finished.connect(self._on_hunt_finished)
@@ -754,10 +1002,23 @@ class ProcessWorkspace(QWidget):
 
     def stop_job_hunt(self) -> None:
         if self._hunt_worker and self._hunt_worker.isRunning():
-            self.add_agent_message("Stopping Job Hunt... (Waiting for current step to finish)")
-            self._hunt_worker.requestInterruption()
+            self.add_agent_message("Stopping Job Hunt... aborting active tasks.")
+            self._hunt_worker.stop()
             self._toggle_btn.setEnabled(False)
             self._toggle_btn.setText("Stopping...")
+            self._next_btn.setEnabled(False)
+
+    def move_to_next_job(self) -> None:
+        if self._hunt_worker and self._hunt_worker.isRunning():
+            self.add_agent_message("⏭ Stop & Move to Next triggered. Advancing...")
+            self._hunt_worker.move_to_next()
+            self._next_btn.setText("⏭ Stop & Move to Next")
+        else:
+            self.add_agent_message("No active job hunt in progress to advance.")
+
+    def _on_job_evaluating(self, job_title: str) -> None:
+        self._next_btn.setText("⏭ Stop & Move to Next")
+        self._next_btn.setEnabled(True)
 
     def _on_hunt_finished(self) -> None:
         self._toggle_btn.setEnabled(True)
@@ -767,7 +1028,11 @@ class ProcessWorkspace(QWidget):
                 background-color: #adc6ff; color: #002e69; 
                 border-radius: 8px; font-size: 16px; font-weight: bold;
             }
+            QPushButton:hover { background-color: #cfdcff; }
+            QPushButton:disabled { background-color: #555; color: #aaa; }
         """)
+        self._next_btn.setEnabled(False)
+        self._next_btn.setText("⏭ Stop & Move to Next")
         if self._hunt_worker:
             self._hunt_worker.deleteLater()
             self._hunt_worker = None
@@ -787,7 +1052,23 @@ class ProcessWorkspace(QWidget):
         self._runtime.plugins._context.documents.save_job_description(job)
         analysis = [result.summary, *result.recommendations[:3]]
         pdf_path = getattr(result, "pdf_path", None)
-        self.add_job_card(result.title, result.company, result.match_score, analysis, str(job.id), pdf_path=pdf_path)
+        unsupported = getattr(result, "unsupported_details", [])
+        missing_skills = getattr(result, "missing_core_skills", [])
+        formatting = getattr(result, "formatting_risks", [])
+        self.add_job_card(
+            result.title,
+            result.company,
+            result.match_score,
+            analysis,
+            str(job.id),
+            pdf_path=pdf_path,
+            unsupported_details=unsupported,
+            missing_core_skills=missing_skills,
+            formatting_risks=formatting,
+        )
+        if self._hunt_worker and self._hunt_worker.isRunning():
+            self._next_btn.setText("⏭ Move to Next Job")
+            self._next_btn.setEnabled(True)
 
     def _on_worker_failed(self, message: str) -> None:
         self._toggle_btn.setEnabled(True)
@@ -797,7 +1078,11 @@ class ProcessWorkspace(QWidget):
                 background-color: #adc6ff; color: #002e69; 
                 border-radius: 8px; font-size: 16px; font-weight: bold;
             }
+            QPushButton:hover { background-color: #cfdcff; }
+            QPushButton:disabled { background-color: #555; color: #aaa; }
         """)
+        self._next_btn.setEnabled(False)
+        self._next_btn.setText("⏭ Stop & Move to Next")
         self.add_agent_message(f"Job workflow failed: {message}")
 
     def _open_for_review(self, job_id: str) -> None:
@@ -868,6 +1153,9 @@ class ImportedJob:
         recommendations: list[str],
         status: str = "Analyzed",
         pdf_path: str | None = None,
+        unsupported_details: list[str] | None = None,
+        missing_core_skills: list[str] | None = None,
+        formatting_risks: list[str] | None = None,
     ) -> None:
         self.title = title
         self.company = company
@@ -878,6 +1166,9 @@ class ImportedJob:
         self.recommendations = recommendations
         self.status = status
         self.pdf_path = pdf_path
+        self.unsupported_details = unsupported_details or []
+        self.missing_core_skills = missing_core_skills or []
+        self.formatting_risks = formatting_risks or []
 
 
 class BrowserLaunchWorker(QThread):

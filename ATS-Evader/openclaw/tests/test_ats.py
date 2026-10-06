@@ -24,6 +24,29 @@ async def test_ats_analysis_parses_structured_local_model_output() -> None:
 
     assert result.match_score == 72
     assert result.missing_keywords == ["SQL"]
+    assert result.missing_core_skills == []
+    assert result.unsupported_details == []
+    assert result.formatting_risks == []
+
+
+async def test_ats_analysis_parses_gap_and_flag_fields() -> None:
+    client = StubOllamaClient(
+        '{"match_score": 65, "matched_keywords": ["Python"], '
+        '"missing_keywords": ["Kubernetes"], '
+        '"missing_core_skills": ["Kubernetes", "Docker"], '
+        '"unsupported_details": ["Requires 8+ years distributed systems"], '
+        '"formatting_risks": ["Acronym K8s missing expansion"], '
+        '"recommendations": ["Expand acronyms"], '
+        '"summary": "Moderate alignment with critical infra gaps."}'
+    )
+    analyzer = AtsAnalyzer(client)  # type: ignore[arg-type]
+
+    result = await analyzer.analyze("Python developer", "DevOps & Python developer")
+
+    assert result.match_score == 65
+    assert result.missing_core_skills == ["Kubernetes", "Docker"]
+    assert result.unsupported_details == ["Requires 8+ years distributed systems"]
+    assert result.formatting_risks == ["Acronym K8s missing expansion"]
 
 
 async def test_ats_analysis_rejects_unstructured_model_output() -> None:
