@@ -160,3 +160,24 @@ def test_club_missing_skills_clusters_and_comma_separates() -> None:
     assert "SQL Server, Cosmos DB, Redis" in clubbed
     assert "Docker, Kubernetes" in clubbed
 
+
+async def test_ats_analysis_coerces_string_recommendations_and_loose_fields() -> None:
+    # Simulates the exact response observed from local Ollama where recommendations was a string
+    client = StubOllamaClient(
+        '{\n'
+        '  "match_score": "75%",\n'
+        '  "matched_keywords": ["Python", "React"],\n'
+        '  "missing_keywords": "Cloud",\n'
+        '  "recommendations": "Add cloud infrastructure experience.",\n'
+        '  "summary": "Strong candidate."\n'
+        '}'
+    )
+    analyzer = AtsAnalyzer(client)  # type: ignore[arg-type]
+
+    result = await analyzer.analyze("Python developer", "Cloud developer")
+    assert result.match_score == 75
+    assert result.missing_keywords == ["Cloud"]
+    assert result.recommendations == ["Add cloud infrastructure experience."]
+    assert result.summary == "Strong candidate."
+
+

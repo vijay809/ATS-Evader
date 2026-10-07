@@ -197,10 +197,7 @@ class JobHuntWorker(QThread):
                     
                 if facts:
                     if facts.min_years_experience is not None and facts.min_years_experience > self.min_exp:
-                        skip_msg = f"Skipping '{title}' - Requires {facts.min_years_experience} years exp (You have {self.min_exp})."
-                        self.agent_message.emit(skip_msg)
-                        logger.info(skip_msg)
-                        continue
+                        logger.info(f"JD mentions {facts.min_years_experience} years exp (Profile: {self.min_exp} years) - evaluating without skipping.")
                         
                     if facts.location_type and facts.location_type.lower() != "remote" and self.location.lower() == "remote":
                         skip_msg = f"Skipping '{title}' - It is {facts.location_type} but you require Remote."

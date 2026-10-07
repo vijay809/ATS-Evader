@@ -156,12 +156,46 @@ def club_missing_skills(skills: list[str]) -> list[str]:
     return grouped_result
 
 
+def _coerce_list_of_strings(val: Any) -> list[str]:
+    if val is None:
+        return []
+    if isinstance(val, list):
+        result = []
+        for item in val:
+            if isinstance(item, str):
+                result.append(item.strip())
+            elif isinstance(item, dict):
+                result.append(" ".join(str(v) for v in item.values() if v).strip())
+            else:
+                result.append(str(item).strip())
+        return [r for r in result if r]
+    if isinstance(val, str):
+        val_str = val.strip()
+        if not val_str:
+            return []
+        if "\n" in val_str:
+            lines = [re.sub(r"^[-*•\d.]+\s*", "", line).strip() for line in val_str.splitlines()]
+            return [line for line in lines if line]
+        return [val_str]
+    return [str(val).strip()]
+
+
+def _coerce_int_score(val: Any) -> int:
+    if isinstance(val, (int, float)):
+        return max(0, min(100, int(round(val))))
+    if isinstance(val, str):
+        m = re.search(r"\b(\d{1,3})\b", val)
+        if m:
+            return max(0, min(100, int(m.group(1))))
+    return 50
+
+
 class AtsAnalysis(BaseModel):
     match_score: int = Field(ge=0, le=100)
-    matched_keywords: list[str]
-    missing_keywords: list[str]
-    recommendations: list[str]
-    summary: str
+    matched_keywords: list[str] = Field(default_factory=list)
+    missing_keywords: list[str] = Field(default_factory=list)
+    recommendations: list[str] = Field(default_factory=list)
+    summary: str = ""
     favoring_points: list[str] = Field(default_factory=list)
     unsupported_details: list[str] = Field(default_factory=list)
     missing_core_skills: list[str] = Field(default_factory=list)
@@ -463,22 +497,59 @@ Respond ONLY with valid JSON matching this schema:
     def _parse_analysis(response: str) -> AtsAnalysis:
         try:
             data = AtsAnalyzer._parse_json(response)
-            if isinstance(data, dict):
-                fav = data.get("favoring_points")
-                if fav and isinstance(fav, list):
-                    data["favoring_points"] = clean_favoring_points(fav)
-                elif "summary" in data:
-                    data["favoring_points"] = clean_favoring_points([data["summary"], *data.get("recommendations", [])])
+            if not isinstance(data, dict):
+                raise AtsAnalysisError(f"Expected a JSON object but got {type(data).__name__}")
+
+            # Normalize match_score
+            data["match_score"] = _coerce_int_score(data.get("match_score", 50))
+
+            # Normalize list fields
+            list_fields = [
+                "matched_keywords",
+                "missing_keywords",
+                "recommendations",
+                "favoring_points",
+                "missing_core_skills",
+                "unsupported_details",
+                "formatting_risks",
+            ]
+            for field in list_fields:
+                data[field] = _coerce_list_of_strings(data.get(field))
+
+            # Normalize summary
+            summary_val = data.get("summary")
+            if isinstance(summary_val, list):
+                data["summary"] = " ".join(str(s) for s in summary_val)
+            elif summary_val is None:
+                data["summary"] = ""
+            else:
+                data["summary"] = str(summary_val).strip()
+
+            # Clean favoring points
+            fav = data.get("favoring_points")
+            if fav:
+                data["favoring_points"] = clean_favoring_points(fav)
+            elif data.get("summary"):
+                data["favoring_points"] = clean_favoring_points([data["summary"], *data.get("recommendations", [])])
+
             return AtsAnalysis.model_validate(data)
-        except ValueError as error:
-            raise AtsAnalysisError("The local model returned an invalid ATS analysis") from error
+        except Exception as error:
+            logger.error(f"Failed to parse ATS analysis: {error}. Raw model response was:\n{response}")
+            raise AtsAnalysisError(f"The local model returned an invalid ATS analysis: {error}") from error
 
     @staticmethod
     def _parse_tailoring(response: str) -> TailoredResume:
         try:
-            return TailoredResume.model_validate(AtsAnalyzer._parse_json(response))
-        except ValueError as error:
-            raise AtsAnalysisError("The local model returned an invalid tailored resume") from error
+            data = AtsAnalyzer._parse_json(response)
+            if isinstance(data, dict):
+                data["change_summary"] = _coerce_list_of_strings(data.get("change_summary"))
+                data["warnings"] = _coerce_list_of_strings(data.get("warnings"))
+                if not isinstance(data.get("tailored_resume"), str):
+                    data["tailored_resume"] = str(data.get("tailored_resume") or "")
+            return TailoredResume.model_validate(data)
+        except Exception as error:
+            logger.error(f"Failed to parse tailored resume: {error}. Raw model response was:\n{response}")
+            raise AtsAnalysisError(f"The local model returned an invalid tailored resume: {error}") from error
 
     @staticmethod
     def _parse_json(response: str) -> Any:
